@@ -1,0 +1,1 @@
+AI study companion (recommended) — upload your college notes/syllabus → RAG + adaptive flashcards + doubt solver, with auth + Postgres, deployed (Vercel + Render). Thinking tax: build an eval that scores flashcard/answer quality + a latency/cost budget. Bonus: you'll actually use it, so you finish it.

@@ -1,0 +1,35 @@
+[project]
+name = "paper-pilot-backend"
+version = "0.1.0"
+description = "Paper Pilot - AI-powered paper analysis backend"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "langchain",
+    "langchain-community",
+    "langchain-openai",
+    "httpx",
+    "pypdf2",
+    "pymupdf",
+    "tiktoken",
+    "sqlalchemy",
+    "asyncpg",
+    "psycopg2-binary",
+    "sse-starlette",
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "deepeval",
+    "pandas",
+    "pydantic-settings",
+]
+
+[dependency-groups]
+dev = ["ruff"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "W"]

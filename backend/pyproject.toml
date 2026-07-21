@@ -22,6 +22,8 @@ dependencies = [
     "deepeval",
     "pandas",
     "pydantic-settings",
+    "pgvector",
+    "alembic",
 ]
 
 [dependency-groups]

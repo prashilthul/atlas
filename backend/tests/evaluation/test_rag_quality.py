@@ -1,11 +1,3 @@
-"""
-RAG quality evaluation harness using DeepEval.
-
-Tests RAG pipeline output quality across faithfulness, answer relevancy,
-contextual precision, and contextual recall metrics using a golden dataset
-of queries grounded in the "Attention Is All You Need" paper.
-"""
-
 import os
 import pytest
 from deepeval import assert_test
@@ -19,28 +11,17 @@ from deepeval.metrics import (
 from deepeval.models import OpenRouterModel
 from deepeval.test_case import LLMTestCase
 
-# ---------------------------------------------------------------------------
-# Judge model — lightweight OpenRouter model for CI-speed evaluation
-# ---------------------------------------------------------------------------
 _api_key = os.environ.get("OPENROUTER_API_KEY")
-_judge = OpenRouterModel(
-    model="openai/gpt-4o-mini",
-    api_key=_api_key,
-)
 
-# ---------------------------------------------------------------------------
-# Metrics with quality gates
-# ---------------------------------------------------------------------------
-_faithfulness = FaithfulnessMetric(threshold=0.85, model=_judge)
-_answer_relevancy = AnswerRelevancyMetric(threshold=0.8, model=_judge)
-_contextual_precision = ContextualPrecisionMetric(threshold=0.7, model=_judge)
-_contextual_recall = ContextualRecallMetric(threshold=0.7, model=_judge)
+def _judge():
+    return OpenRouterModel(model="openai/gpt-4o-mini", api_key=_api_key)
+
+_faithfulness = FaithfulnessMetric(threshold=0.85, model=_judge())
+_answer_relevancy = AnswerRelevancyMetric(threshold=0.8, model=_judge())
+_contextual_precision = ContextualPrecisionMetric(threshold=0.7, model=_judge())
+_contextual_recall = ContextualRecallMetric(threshold=0.7, model=_judge())
 
 _metrics = [_faithfulness, _answer_relevancy, _contextual_precision, _contextual_recall]
-
-# ---------------------------------------------------------------------------
-# Golden dataset — excerpts from "Attention Is All You Need" (Vaswani et al., 2017)
-# ---------------------------------------------------------------------------
 _EXCERPTS = {
     "abstract": (
         "The dominant sequence transduction models are based on complex recurrent "

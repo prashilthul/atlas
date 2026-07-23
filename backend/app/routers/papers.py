@@ -1,13 +1,19 @@
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
-from sqlalchemy import select, update
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import _get_session_factory, get_db
 from app.models import Chunk, Paper, PaperSection
-from app.schemas import PaperResponse, PaperStatus
+from app.schemas import (
+    PaperDetailResponse,
+    PaperListResponse,
+    PaperResponse,
+    PaperStatus,
+    SectionInfo,
+)
 from app.services.chunker import ChunkData, chunk_sections
 from app.services.embedder import embed_chunks
 from app.services.parser import parse_pdf
@@ -105,6 +111,131 @@ async def get_paper_status(
         status=paper.status,
         error=paper.error_message,
     )
+
+
+@router.get("", response_model=PaperListResponse)
+async def list_papers(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    search: str | None = Query(None),
+    year_min: int | None = Query(None),
+    year_max: int | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    conditions = [True]
+
+    if search:
+        pattern = f"%{search}%"
+        conditions.append(
+            Paper.title.ilike(pattern)
+            | func.array_to_string(Paper.authors, "|||").ilike(pattern)
+        )
+    if year_min is not None:
+        conditions.append(Paper.year >= year_min)
+    if year_max is not None:
+        conditions.append(Paper.year <= year_max)
+
+    count_q = select(func.count()).select_from(Paper).where(*conditions)
+    total = (await db.execute(count_q)).scalar()
+
+    offset = (page - 1) * page_size
+    query = (
+        select(Paper)
+        .where(*conditions)
+        .order_by(Paper.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
+    papers = (await db.execute(query)).scalars().all()
+
+    paper_ids = [p.id for p in papers]
+    section_counts: dict = {}
+    chunk_counts: dict = {}
+
+    if paper_ids:
+        rows = (
+            await db.execute(
+                select(PaperSection.paper_id, func.count().label("cnt"))
+                .where(PaperSection.paper_id.in_(paper_ids))
+                .group_by(PaperSection.paper_id)
+            )
+        ).all()
+        section_counts = {r.paper_id: r.cnt for r in rows}
+
+        rows = (
+            await db.execute(
+                select(Chunk.paper_id, func.count().label("cnt"))
+                .where(Chunk.paper_id.in_(paper_ids))
+                .group_by(Chunk.paper_id)
+            )
+        ).all()
+        chunk_counts = {r.paper_id: r.cnt for r in rows}
+
+    items = [
+        PaperListItem(
+            id=str(p.id),
+            title=p.title,
+            authors=p.authors,
+            year=p.year,
+            section_count=section_counts.get(p.id, 0),
+            chunk_count=chunk_counts.get(p.id, 0),
+            status=p.status,
+            created_at=p.created_at.isoformat(),
+        )
+        for p in papers
+    ]
+
+    return PaperListResponse(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/{paper_id}", response_model=PaperDetailResponse)
+async def get_paper(
+    paper_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Paper).where(Paper.id == paper_id))
+    paper = result.scalar_one_or_none()
+    if paper is None:
+        raise HTTPException(404, "Paper not found")
+
+    sections_result = await db.execute(
+        select(PaperSection)
+        .where(PaperSection.paper_id == paper_id)
+        .order_by(PaperSection.order_index)
+    )
+    sections = sections_result.scalars().all()
+
+    return PaperDetailResponse(
+        id=str(paper.id),
+        title=paper.title,
+        authors=paper.authors,
+        abstract=paper.abstract,
+        year=paper.year,
+        source_url=paper.source_url,
+        status=paper.status,
+        created_at=paper.created_at.isoformat(),
+        sections=[
+            SectionInfo(
+                heading=s.heading,
+                level=s.level,
+                order_index=s.order_index,
+            )
+            for s in sections
+        ],
+    )
+
+
+@router.delete("/{paper_id}", status_code=204)
+async def delete_paper(
+    paper_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Paper).where(Paper.id == paper_id))
+    paper = result.scalar_one_or_none()
+    if paper is None:
+        raise HTTPException(404, "Paper not found")
+    await db.delete(paper)
+    await db.commit()
 
 
 async def _embed_and_update(paper_id: UUID) -> None:

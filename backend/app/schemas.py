@@ -47,3 +47,39 @@ class PaperStatus(BaseModel):
     id: str
     status: str
     error: str | None = None
+
+
+class SectionInfo(BaseModel):
+    heading: str
+    level: int
+    order_index: int
+
+
+class PaperListItem(BaseModel):
+    id: str
+    title: str
+    authors: list[str]
+    year: int | None
+    section_count: int
+    chunk_count: int
+    status: str
+    created_at: str
+
+
+class PaperListResponse(BaseModel):
+    items: list[PaperListItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class PaperDetailResponse(BaseModel):
+    id: str
+    title: str
+    authors: list[str]
+    abstract: str | None
+    year: int | None
+    source_url: str | None
+    status: str
+    created_at: str
+    sections: list[SectionInfo]

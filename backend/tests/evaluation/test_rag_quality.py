@@ -12,6 +12,8 @@ from deepeval.models import OpenRouterModel
 from deepeval.test_case import LLMTestCase
 
 _api_key = os.environ.get("OPENROUTER_API_KEY")
+if not _api_key:
+    pytest.skip("OPENROUTER_API_KEY not set — skipping all DeepEval tests", allow_module_level=True)
 
 def _judge():
     return OpenRouterModel(model="openai/gpt-4o-mini", api_key=_api_key)

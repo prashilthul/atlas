@@ -33,3 +33,17 @@ class PaperSchema(BaseModel):
     sections: list[SectionSchema] = []
     citations: list[CitationSchema] = []
     references: list[ReferenceSchema] = []
+
+
+class PaperResponse(BaseModel):
+    id: str
+    title: str
+    authors: list[str]
+    chunk_count: int
+    status: str
+
+
+class PaperStatus(BaseModel):
+    id: str
+    status: str
+    error: str | None = None

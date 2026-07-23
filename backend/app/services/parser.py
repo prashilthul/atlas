@@ -354,8 +354,13 @@ def _parse_reference(marker: str, raw: str) -> ReferenceSchema:
 # ---------------------------------------------------------------------------
 
 
-def parse_pdf(file_path: str | Path) -> PaperSchema:
-    doc = fitz.open(str(file_path))
+def parse_pdf(file_path: str | Path | None = None, *, stream: bytes | None = None) -> PaperSchema:
+    if stream is not None:
+        doc = fitz.open(stream=stream, filetype="pdf")
+    elif file_path is not None:
+        doc = fitz.open(str(file_path))
+    else:
+        raise ValueError("Either file_path or stream must be provided")
     try:
         blocks = _extract_blocks(doc)
         if not blocks:

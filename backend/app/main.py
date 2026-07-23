@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.database import engine
+from app.routers import papers
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,8 @@ app.add_middleware(
     allow_headers=["*"],
     allow_credentials=True,
 )
+
+app.include_router(papers.router)
 
 
 @app.get("/health")

@@ -25,6 +25,7 @@ dependencies = [
     "pgvector",
     "alembic",
     "sentence-transformers",
+    "python-multipart>=0.0.32",
 ]
 
 [dependency-groups]

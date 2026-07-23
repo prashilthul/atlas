@@ -21,6 +21,8 @@ class Paper(Base):
     abstract: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     source_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="processing")
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
 
 

@@ -9,6 +9,7 @@ from sqlalchemy import text
 from app.config import settings
 from app.database import engine
 from app.routers import papers
+from app.routes.chat import router as chat_router
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ app.add_middleware(
 )
 
 app.include_router(papers.router)
+app.include_router(chat_router)
 
 
 @app.get("/health")

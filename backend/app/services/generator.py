@@ -1,5 +1,6 @@
 import logging
 import re
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 
 from langchain_openai import ChatOpenAI
@@ -119,3 +120,15 @@ async def generate(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
     )
+
+
+async def stream_generate(
+    query: str,
+    chunks: list[ChunkResult],
+    model: str = "openrouter/free",
+    temperature: float = 0.1,
+) -> AsyncGenerator[str, None]:
+    from app.services.streamer import stream_generate as _sg
+
+    async for event in _sg(query, chunks, model, temperature):
+        yield event

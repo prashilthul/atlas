@@ -10,6 +10,7 @@ from app.config import settings
 from app.database import engine
 from app.routers import papers
 from app.routes.chat import router as chat_router
+from app.routes.metrics import router as metrics_router
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ app.add_middleware(
 
 app.include_router(papers.router)
 app.include_router(chat_router)
+app.include_router(metrics_router)
 
 
 @app.get("/health")

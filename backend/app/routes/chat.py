@@ -1,6 +1,5 @@
 import json
 import logging
-import uuid
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,6 +13,7 @@ from app.models import ChatMessage, ChatSession
 from app.services.generator import generate, stream_generate
 from app.services.reranker import rerank
 from app.services.retriever import retrieve
+from app.services.tracing import Tracer
 
 logger = logging.getLogger(__name__)
 
@@ -54,14 +54,15 @@ async def chat(
         await db.flush()
         session_id = session.id
 
-    chunks = await retrieve(query=req.query, paper_ids=req.paper_ids, top_k=20, db=db)
-    chunks = await rerank(query=req.query, chunks=chunks, top_k=5)
+    tracer = Tracer()
+
+    chunks = await retrieve(query=req.query, paper_ids=req.paper_ids, top_k=20, db=db, tracer=tracer)
+    chunks = await rerank(query=req.query, chunks=chunks, top_k=5, tracer=tracer)
 
     if req.stream:
-        return EventSourceResponse(_stream_and_store(req.query, chunks, session_id, db))
+        return EventSourceResponse(_stream_and_store(req.query, chunks, session_id, db, tracer))
 
-    result = await generate(query=req.query, chunks=chunks)
-    trace_id = str(uuid.uuid4())
+    result = await generate(query=req.query, chunks=chunks, tracer=tracer)
 
     db.add(ChatMessage(session_id=session_id, role="user", content=req.query))
     db.add(
@@ -72,13 +73,14 @@ async def chat(
             citations=[c.__dict__ for c in result.citations] if result.citations else None,
         )
     )
+    await tracer.store(db)
     await db.commit()
 
     return ChatResponse(
         session_id=str(session_id),
         answer=result.answer,
         citations=[c.__dict__ for c in result.citations],
-        trace_id=trace_id,
+        trace_id=tracer.trace_id,
     )
 
 
@@ -87,6 +89,7 @@ async def _stream_and_store(
     chunks: list,
     session_id: UUID,
     db: AsyncSession,
+    tracer: Tracer,
 ):
     db.add(ChatMessage(session_id=session_id, role="user", content=query))
     await db.flush()
@@ -94,7 +97,7 @@ async def _stream_and_store(
     full_text = ""
     final_citations = None
 
-    async for event_str in stream_generate(query, chunks):
+    async for event_str in stream_generate(query, chunks, tracer=tracer):
         yield event_str
 
         lines = event_str.strip().split("\n")
@@ -118,7 +121,8 @@ async def _stream_and_store(
                 citations=final_citations,
             )
         )
-        await db.commit()
+    await tracer.store(db)
+    await db.commit()
 
 
 @router.get("/sessions/{session_id}")

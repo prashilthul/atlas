@@ -93,6 +93,7 @@ class TraceSpan(Base):
 
     id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     trace_id: Mapped[str] = mapped_column(String, nullable=False)
+    span_id: Mapped[str] = mapped_column(String, nullable=False)
     parent_span_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     attributes: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)

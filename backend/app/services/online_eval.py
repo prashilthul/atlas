@@ -7,6 +7,7 @@ from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
 from app.config import settings
+from app.services.tracing import Tracer
 
 logger = logging.getLogger(__name__)
 
@@ -67,18 +68,36 @@ async def judge_citation_accuracy(answer: str, chunks: list) -> float | None:
 
 
 async def run_online_eval(
-    query: str, answer: str, chunks: list, error_occurred: bool = False
+    query: str, answer: str, chunks: list, error_occurred: bool = False,
+    tracer: Tracer | None = None,
 ) -> dict[str, Any] | None:
     if not should_sample(error_occurred):
         return None
 
-    faithfulness = await judge_faithfulness(query, answer, chunks)
-    citation_accuracy = await judge_citation_accuracy(answer, chunks)
+    if tracer:
+        async with tracer.span(
+            "judge",
+            attributes={"model": settings.JUDGE_MODEL},
+        ) as span:
+            faithfulness = await judge_faithfulness(query, answer, chunks)
+            citation_accuracy = await judge_citation_accuracy(answer, chunks)
 
-    if faithfulness is None and citation_accuracy is None:
-        return None
+            scores = {}
+            if faithfulness is not None:
+                scores["faithfulness"] = faithfulness
+            if citation_accuracy is not None:
+                scores["citation_accuracy"] = citation_accuracy
 
-    return {
-        "faithfulness": faithfulness,
-        "citation_accuracy": citation_accuracy,
-    }
+            span.attributes["scores_json"] = json.dumps(scores)
+            return scores if scores else None
+    else:
+        faithfulness = await judge_faithfulness(query, answer, chunks)
+        citation_accuracy = await judge_citation_accuracy(answer, chunks)
+
+        if faithfulness is None and citation_accuracy is None:
+            return None
+
+        return {
+            "faithfulness": faithfulness,
+            "citation_accuracy": citation_accuracy,
+        }

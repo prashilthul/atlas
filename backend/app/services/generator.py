@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.config import settings
 from app.services.retriever import ChunkResult
+from app.services.tracing import Tracer
 
 logger = logging.getLogger(__name__)
 
@@ -79,14 +80,22 @@ async def generate(
     chunks: list[ChunkResult],
     model: str = "openrouter/free",
     temperature: float = 0.1,
+    tracer: Tracer | None = None,
 ) -> GenerationResult:
     if not query or not chunks:
+        if tracer:
+            async with tracer.span(
+                "generate",
+                attributes={"model": model, "input_tokens": 0, "output_tokens": 0, "finish_reason": "no_input", "context_truncated": False, "context_token_count": 0},
+            ):
+                pass
         return GenerationResult(
             answer="The provided paper excerpts do not contain information about this.",
             finish_reason="no_input",
         )
 
     context = _build_context(chunks)
+    context_token_count = max(1, len(context) // 4)
 
     llm = ChatOpenAI(
         model=model,
@@ -104,22 +113,51 @@ async def generate(
         ),
     ]
 
-    response = llm.invoke(messages)
+    if tracer:
+        async with tracer.span(
+            "generate",
+            attributes={
+                "model": model,
+                "context_token_count": context_token_count,
+                "context_truncated": context_token_count > 4000,
+            },
+        ) as span:
+            response = llm.invoke(messages)
+            answer = response.content or ""
+            citations = _extract_citations(answer, chunks)
 
-    answer = response.content or ""
-    citations = _extract_citations(answer, chunks)
+            usage = response.usage_metadata if hasattr(response, "usage_metadata") else None
+            input_tokens = usage.get("input_tokens", 0) if usage else 0
+            output_tokens = usage.get("output_tokens", 0) if usage else 0
 
-    usage = response.usage_metadata if hasattr(response, "usage_metadata") else None
-    input_tokens = usage.get("input_tokens", 0) if usage else 0
-    output_tokens = usage.get("output_tokens", 0) if usage else 0
+            span.attributes["input_tokens"] = input_tokens
+            span.attributes["output_tokens"] = output_tokens
+            span.attributes["finish_reason"] = response.response_metadata.get("finish_reason") if response.response_metadata else None
 
-    return GenerationResult(
-        answer=answer,
-        citations=citations,
-        finish_reason=response.response_metadata.get("finish_reason") if response.response_metadata else None,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-    )
+            return GenerationResult(
+                answer=answer,
+                citations=citations,
+                finish_reason=response.response_metadata.get("finish_reason") if response.response_metadata else None,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+    else:
+        response = llm.invoke(messages)
+
+        answer = response.content or ""
+        citations = _extract_citations(answer, chunks)
+
+        usage = response.usage_metadata if hasattr(response, "usage_metadata") else None
+        input_tokens = usage.get("input_tokens", 0) if usage else 0
+        output_tokens = usage.get("output_tokens", 0) if usage else 0
+
+        return GenerationResult(
+            answer=answer,
+            citations=citations,
+            finish_reason=response.response_metadata.get("finish_reason") if response.response_metadata else None,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
 
 
 async def stream_generate(
@@ -127,8 +165,9 @@ async def stream_generate(
     chunks: list[ChunkResult],
     model: str = "openrouter/free",
     temperature: float = 0.1,
+    tracer: Tracer | None = None,
 ) -> AsyncGenerator[str, None]:
     from app.services.streamer import stream_generate as _sg
 
-    async for event in _sg(query, chunks, model, temperature):
+    async for event in _sg(query, chunks, model, temperature, tracer):
         yield event

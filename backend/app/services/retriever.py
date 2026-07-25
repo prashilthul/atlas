@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import _get_session_factory
 from app.services.embedder import embed_query
+from app.services.tracing import Tracer
 
 
 @dataclass
@@ -24,9 +25,22 @@ async def retrieve(
     top_k: int = 10,
     score_threshold: float = 0.4,
     db: AsyncSession | None = None,
+    tracer: Tracer | None = None,
 ) -> list[ChunkResult]:
-    query_vec = embed_query(query)
+    if tracer:
+        async with tracer.span("embed", attributes={"model": "nvidia/nemotron-3-embed-1b:free", "input_length": len(query)}) as span:
+            query_vec = embed_query(query)
+            span.attributes["dimension"] = len(query_vec) if query_vec else 0
+    else:
+        query_vec = embed_query(query)
+
     if not query_vec:
+        if tracer:
+            async with tracer.span(
+                "vector_search",
+                attributes={"top_k": top_k, "results_count": 0, "empty_result": True, "filter_paper_ids": bool(paper_ids)},
+            ):
+                pass
         return []
 
     close_db = False
@@ -63,8 +77,18 @@ async def retrieve(
                 LIMIT :top_k
             """)
 
-        result = await db.execute(stmt, params)
-        rows = result.fetchall()
+        if tracer:
+            async with tracer.span(
+                "vector_search",
+                attributes={"top_k": top_k, "filter_paper_ids": bool(paper_ids)},
+            ) as span:
+                result = await db.execute(stmt, params)
+                rows = result.fetchall()
+                span.attributes["results_count"] = len(rows)
+                span.attributes["empty_result"] = len(rows) == 0
+        else:
+            result = await db.execute(stmt, params)
+            rows = result.fetchall()
 
         return [
             ChunkResult(

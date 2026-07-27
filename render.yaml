@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: paper-pilot-backend
+    env: python
+    buildCommand: cd backend && uv sync
+    startCommand: cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: paper-pilot-db
+          property: connectionString
+      - key: FRONTEND_URL
+        value: https://paper-pilot-frontend.onrender.com
+      - key: LOG_LEVEL
+        value: INFO
+
+  - type: web
+    name: paper-pilot-frontend
+    env: node
+    buildCommand: cd frontend && npm ci && npm run build
+    startCommand: cd frontend && npm start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        value: https://paper-pilot-backend.onrender.com
+
+databases:
+  - name: paper-pilot-db
+    plan: free
+    databaseName: paperpilot
+    postgresMajorVersion: 16

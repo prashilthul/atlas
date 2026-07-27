@@ -1,0 +1,49 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.0
+    environment:
+      POSTGRES_USER: paperpilot
+      POSTGRES_PASSWORD: paperpilot
+      POSTGRES_DB: paperpilot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paperpilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - paper-pilot-net
+
+  backend:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://paperpilot:paperpilot@postgres:5432/paperpilot
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    networks:
+      - paper-pilot-net
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://backend:8000
+    depends_on:
+      - backend
+    networks:
+      - paper-pilot-net
+
+volumes:
+  pgdata:
+
+networks:
+  paper-pilot-net:
+    driver: bridge

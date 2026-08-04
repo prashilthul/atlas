@@ -10,6 +10,11 @@ import {
   Bar,
   AreaChart,
   Area,
+  RadarChart,
+  Radar,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -18,7 +23,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 // --- Types ---
 
@@ -598,6 +603,140 @@ function LowScoringQueries({
   );
 }
 
+// --- Health Radar (component scores) ---
+
+function HealthRadar({
+  summary,
+  loading,
+}: {
+  summary: MetricsSummary | null;
+  loading: boolean;
+}) {
+  if (loading) return <SkeletonCard />;
+  if (!summary) return <EmptyState message="No data yet" />;
+
+  const { latency, empty_result_rate, citation_accuracy } = summary.components;
+  const data = [
+    { metric: "Latency", score: latency.score },
+    { metric: "Retrieval", score: empty_result_rate.score },
+    { metric: "Citations", score: citation_accuracy.score },
+  ];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Health breakdown</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ResponsiveContainer width="100%" height={260}>
+          <RadarChart data={data} cx="50%" cy="50%" outerRadius="72%">
+            <PolarGrid stroke="#d9d9d9" />
+            <PolarAngleAxis
+              dataKey="metric"
+              tick={{ fontSize: 11, fill: "#404040" }}
+            />
+            <PolarRadiusAxis
+              domain={[0, 100]}
+              tick={{ fontSize: 10, fill: "#8c8c8c" }}
+            />
+            <Radar
+              dataKey="score"
+              stroke="#1a1a1a"
+              fill="#404040"
+              fillOpacity={0.35}
+              strokeWidth={2}
+            />
+            <Tooltip
+              content={
+                <ChartTooltip valueFormatter={(v) => Math.round(v) + "/100"} />
+              }
+            />
+          </RadarChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- Pipeline activity stacked area ---
+
+function PipelineActivity({
+  data,
+  loading,
+}: {
+  data: TimeseriesPoint[];
+  loading: boolean;
+}) {
+  const chartData = useMemo(
+    () =>
+      data.map((p) => ({
+        date: p.date.slice(0, 10),
+        Embeddings: p.span_counts.embed,
+        Search: p.span_counts.search,
+        Rerank: p.span_counts.rerank,
+        Generate: p.span_counts.generate,
+      })),
+    [data]
+  );
+
+  if (loading) return <SkeletonCard />;
+  if (chartData.length === 0) return <EmptyState message="No data yet" />;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Pipeline activity</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ResponsiveContainer width="100%" height={260}>
+          <AreaChart data={chartData}>
+            <CartesianGrid stroke="#d9d9d9" strokeDasharray="3 3" />
+            <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#595959" }} />
+            <YAxis
+              allowDecimals={false}
+              tick={{ fontSize: 10, fill: "#595959" }}
+            />
+            <Tooltip />
+            <Legend
+              formatter={(value) => (
+                <span className="text-xs text-muted-foreground">{value}</span>
+              )}
+            />
+            <Area
+              type="monotone"
+              dataKey="Embeddings"
+              stackId="1"
+              stroke="#737373"
+              fill="#d9d9d9"
+            />
+            <Area
+              type="monotone"
+              dataKey="Search"
+              stackId="1"
+              stroke="#404040"
+              fill="#a3a3a3"
+            />
+            <Area
+              type="monotone"
+              dataKey="Rerank"
+              stackId="1"
+              stroke="#262626"
+              fill="#737373"
+            />
+            <Area
+              type="monotone"
+              dataKey="Generate"
+              stackId="1"
+              stroke="#171717"
+              fill="#404040"
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+}
+
 // --- Main page ---
 
 export default function DashboardPage() {
@@ -608,6 +747,9 @@ export default function DashboardPage() {
   const [timeseries30d, setTimeseries30d] =
     useState<TimeseriesResponse | null>(null);
   const [lowScoreData, setLowScoreData] = useState<LowScoreRow[]>([]);
+  const [rerankerStats, setRerankerStats] = useState<any>(null);
+  const [tokenUsage, setTokenUsage] = useState<any>(null);
+  const [surfacedTraces, setSurfacedTraces] = useState<any>(null);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -617,10 +759,13 @@ export default function DashboardPage() {
     setError(null);
 
     try {
-      const [summaryRes, ts7dRes, ts30dRes] = await Promise.all([
+      const [summaryRes, ts7dRes, ts30dRes, rerankRes, tokenRes, surfacedRes] = await Promise.all([
         fetch(`${API_BASE}/api/metrics/summary`),
         fetch(`${API_BASE}/api/metrics/timeseries?range=7d`),
         fetch(`${API_BASE}/api/metrics/timeseries?range=30d`),
+        fetch(`${API_BASE}/api/metrics/reranker-stats?range=7d`),
+        fetch(`${API_BASE}/api/metrics/token-usage?range=7d`),
+        fetch(`${API_BASE}/api/metrics/surfaced-traces?limit=5`),
       ]);
 
       if (!summaryRes.ok) throw new Error("Failed to fetch metrics summary");
@@ -635,7 +780,11 @@ export default function DashboardPage() {
       setTimeseries7d(ts7dData);
       setTimeseries30d(ts30dData);
 
-      // Try fetching low-scoring queries (may not exist yet)
+      if (rerankRes.ok) setRerankerStats(await rerankRes.json());
+      if (tokenRes.ok) setTokenUsage(await tokenRes.json());
+      if (surfacedRes.ok) setSurfacedTraces(await surfacedRes.json());
+
+      // Try fetching low-scoring queries
       try {
         const lsqRes = await fetch(
           `${API_BASE}/api/metrics/low-scoring-queries`
@@ -645,7 +794,7 @@ export default function DashboardPage() {
           setLowScoreData(lsqData);
         }
       } catch {
-        // endpoint not available yet -- leave empty
+        // endpoint not available yet
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load metrics");
@@ -668,7 +817,7 @@ export default function DashboardPage() {
     <div className="mx-auto max-w-6xl px-4 py-8">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-xl font-semibold text-foreground">Dashboard</h1>
+        <h1 className="text-2xl font-semibold text-foreground font-serif tracking-tight">Dashboard</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           System health and RAG pipeline metrics
         </p>
@@ -772,6 +921,11 @@ export default function DashboardPage() {
           loading={ts7dLoading && ts30dLoading}
         />
 
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <HealthRadar summary={summary} loading={summaryLoading} />
+          <PipelineActivity data={timeseries7d?.data || []} loading={ts7dLoading} />
+        </div>
+
         {/* Row 3: Per-paper accuracy + Latency breakdown */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <PerPaperAccuracy
@@ -784,7 +938,113 @@ export default function DashboardPage() {
           />
         </div>
 
-        {/* Row 4: Low-scoring queries */}
+        {/* Row 4: Reranker Fallback Rate & Token Burn */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          {/* Reranker Value & Fallback Rate */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>Reranker Fallback Rate</CardTitle>
+              {rerankerStats && (
+                <Badge variant={rerankerStats.fallback_rate_pct > 15 ? "destructive" : "secondary"}>
+                  Fallback: {rerankerStats.fallback_rate_pct}%
+                </Badge>
+              )}
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {rerankerStats?.daily?.length > 0 ? (
+                <ResponsiveContainer width="100%" height={160}>
+                  <BarChart data={rerankerStats.daily}>
+                    <CartesianGrid stroke="#bfbfbf" strokeDasharray="3 3" />
+                    <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                    <YAxis tick={{ fontSize: 10 }} />
+                    <Tooltip />
+                    <Bar dataKey="total_calls" name="Total Reranks" fill="#3b82f6" radius={[2, 2, 0, 0]} />
+                    <Bar dataKey="fallback_calls" name="Fallbacks" fill="#f59e0b" radius={[2, 2, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-xs text-muted-foreground py-4 text-center">No reranker stats recorded yet.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Token Usage & Cost Trend */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>Token Cost & Usage Trend</CardTitle>
+              {tokenUsage && (
+                <Badge variant="outline" className="font-mono text-xs">
+                  {tokenUsage.total_tokens?.toLocaleString() || 0} Total Tokens
+                </Badge>
+              )}
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {tokenUsage?.daily?.length > 0 ? (
+                <ResponsiveContainer width="100%" height={160}>
+                  <AreaChart data={tokenUsage.daily}>
+                    <CartesianGrid stroke="#bfbfbf" strokeDasharray="3 3" />
+                    <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                    <YAxis tick={{ fontSize: 10 }} />
+                    <Tooltip />
+                    <Area type="monotone" dataKey="input_tokens" name="Input Tokens" stroke="#6366f1" fill="#c7d2fe" />
+                    <Area type="monotone" dataKey="output_tokens" name="Output Tokens" stroke="#10b981" fill="#a7f3d0" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-xs text-muted-foreground py-4 text-center">No token usage metrics available.</p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Row 5: Surfaced Issues & Slow Traces Panel */}
+        {surfacedTraces && (surfacedTraces.recent_errors?.length > 0 || surfacedTraces.slow_traces?.length > 0) && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>Surfaced Pipeline Issues & Slow Traces</CardTitle>
+              <a href="/traces" className="text-xs font-semibold text-blue-600 hover:underline">
+                Open Trace Inspector →
+              </a>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                {/* Recent Errors */}
+                <div className="space-y-2">
+                  <span className="font-bold text-red-600 tracking-wide uppercase text-[10px]">
+                    Recent Errors & Fallbacks ({surfacedTraces.recent_errors?.length || 0})
+                  </span>
+                  <div className="space-y-1.5">
+                    {surfacedTraces.recent_errors?.map((tr: any) => (
+                      <div key={tr.trace_id} className="p-2 rounded bg-slate-50 border border-slate-200 flex items-center justify-between">
+                        <span className="font-mono font-semibold truncate max-w-[180px]">Trace {tr.trace_id.slice(0, 8)}...</span>
+                        <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 bg-amber-50">
+                          {tr.has_error ? "Error" : "Rerank Fallback"}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Slow Traces */}
+                <div className="space-y-2">
+                  <span className="font-bold text-amber-600 tracking-wide uppercase text-[10px]">
+                    Slow Traces (p95+ &gt; 2s) ({surfacedTraces.slow_traces?.length || 0})
+                  </span>
+                  <div className="space-y-1.5">
+                    {surfacedTraces.slow_traces?.map((tr: any) => (
+                      <div key={tr.trace_id} className="p-2 rounded bg-slate-50 border border-slate-200 flex items-center justify-between">
+                        <span className="font-mono font-semibold truncate max-w-[180px]">Trace {tr.trace_id.slice(0, 8)}...</span>
+                        <span className="font-mono font-bold text-slate-700">{tr.total_duration_ms}ms</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Row 6: Low-scoring queries */}
         <LowScoringQueries
           data={lowScoreData}
           loading={loading && lowScoreData.length === 0}

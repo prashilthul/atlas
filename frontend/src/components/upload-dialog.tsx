@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
 
 type Phase = "idle" | "uploading" | "processing" | "complete" | "error";
@@ -296,34 +296,34 @@ export function UploadDialog() {
     }
 
     return (
-      <div className="space-y-3 py-4">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <FileText className="size-4 shrink-0 text-muted-foreground" />
-            <span className="truncate text-sm text-muted-foreground">
+      <div className="space-y-3 py-4 w-full overflow-hidden">
+        <div className="flex items-center justify-between gap-2 w-full min-w-0">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <FileText className="size-4 shrink-0 text-slate-500" />
+            <span className="truncate text-xs font-medium text-slate-700 max-w-[240px]">
               {selectedFile?.name}
             </span>
           </div>
           {selectedFile && (
-            <span className="shrink-0 text-xs text-muted-foreground">
+            <span className="shrink-0 text-[11px] font-mono text-slate-500">
               {formatFileSize(selectedFile.size)}
             </span>
           )}
         </div>
 
-        <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+        <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
           <div
-            className="h-full rounded-full bg-foreground transition-all duration-500 ease-out"
+            className="h-full rounded-full bg-slate-900 transition-all duration-500 ease-out"
             style={{ width: `${progressPercent}%` }}
           />
         </div>
 
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-slate-500">
             {progressMessage}
           </span>
           {phase === "complete" && paperTitle && (
-            <span className="truncate text-xs font-medium text-foreground max-w-[200px]">
+            <span className="truncate font-medium text-slate-900 max-w-[180px]">
               {paperTitle}
             </span>
           )}
@@ -341,7 +341,7 @@ export function UploadDialog() {
           </Button>
         }
       />
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md w-full overflow-hidden">
         <DialogHeader>
           <DialogTitle>Upload Paper</DialogTitle>
           <DialogDescription>

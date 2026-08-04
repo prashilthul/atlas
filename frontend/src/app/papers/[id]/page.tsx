@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { fetchPaper, type PaperDetail } from "@/lib/api";
+import { fetchPaper, deletePaper, type PaperDetail } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { BookOpen, FileText } from "lucide-react";
+import { BookOpen, FileText, Trash2 } from "lucide-react";
+import { showToast } from "@/components/toast";
+import { ConfirmModal } from "@/components/confirm-modal";
 
 export default function PaperDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -13,6 +15,18 @@ export default function PaperDetailPage() {
   const [paper, setPaper] = useState<PaperDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const handleDelete = async () => {
+    if (!paper) return;
+    try {
+      await deletePaper(paper.id);
+      showToast("success", "Paper Deleted", `"${paper.title}" was removed successfully.`);
+      router.push("/papers");
+    } catch {
+      showToast("error", "Delete Failed", "Failed to delete paper. Please try again.");
+    }
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -53,7 +67,7 @@ export default function PaperDetailPage() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
       {/* Title */}
-      <h1 className="text-2xl font-semibold leading-tight text-foreground">
+      <h1 className="font-serif text-3xl font-semibold leading-tight text-foreground">
         {paper.title}
       </h1>
 
@@ -119,12 +133,30 @@ export default function PaperDetailPage() {
         </section>
       )}
 
-      {/* Ask about this paper */}
-      <div className="mt-8">
-        <Button onClick={() => router.push(`/chat?paper=${paper.id}`)}>
+      {/* Actions */}
+      <div className="mt-8 flex items-center gap-3">
+        <Button onClick={() => router.push(`/chat?paper=${paper.id}`)} className="bg-slate-900 hover:bg-slate-800 text-white">
           Ask about this paper
         </Button>
+        <Button
+          variant="outline"
+          className="text-rose-600 border-rose-200 hover:bg-rose-50 hover:border-rose-300"
+          onClick={() => setConfirmOpen(true)}
+        >
+          <Trash2 className="size-4 mr-1.5" /> Delete Paper
+        </Button>
       </div>
+
+      {/* Confirmation Modal */}
+      <ConfirmModal
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="Delete Paper?"
+        description={`Are you sure you want to delete "${paper.title}"? All associated sections and embeddings will be permanently removed.`}
+        confirmText="Delete Paper"
+        variant="destructive"
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Newsreader, JetBrains_Mono } from "next/font/google";
 import { NavBar } from "@/components/nav-bar";
+import { ToastContainer } from "@/components/toast";
 import "./globals.css";
 
 const inter = Inter({
@@ -36,6 +37,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <NavBar />
         <div className="flex-1 pt-14">{children}</div>
+        <ToastContainer />
       </body>
     </html>
   );

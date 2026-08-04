@@ -1,6 +1,7 @@
 import json
 import logging
 import random
+import re
 from typing import Any
 
 from langchain_core.messages import HumanMessage
@@ -34,21 +35,28 @@ def should_sample(error_occurred: bool = False) -> bool:
         return True
     return random.random() < 0.05
 
-
 async def _judge(prompt: str) -> float | None:
+    if not settings.OPENROUTER_API_KEY:
+        return None
     llm = ChatOpenAI(
         model=settings.JUDGE_MODEL,
         openai_api_key=settings.OPENROUTER_API_KEY,
         openai_api_base=_BASE,
         temperature=0,
-        max_tokens=10,
+        max_tokens=60,
+        request_timeout=8.0,
     )
     try:
-        response = llm.invoke([HumanMessage(content=prompt)])
+        response = await llm.ainvoke([HumanMessage(content=prompt)])
         text = (response.content or "").strip()
-        return float(text)
-    except Exception:
-        logger.warning("Judge call failed (rate limit or timeout)")
+        # Parse float using regex (handles reasoning tags like <think>0.95</think>)
+        match = re.search(r"\b(1(?:\.0+)?|0(?:\.\d+)?)\b", text)
+        if match:
+            val = float(match.group(1))
+            return max(0.0, min(1.0, val))
+        return None
+    except Exception as e:
+        logger.warning("Judge call failed: %s", e)
         return None
 
 
@@ -60,7 +68,7 @@ async def judge_faithfulness(query: str, answer: str, chunks: list) -> float | N
 
 async def judge_citation_accuracy(answer: str, chunks: list) -> float | None:
     chunks_json = json.dumps(
-        [{"content": c.content, "section": c.section_heading} for c in chunks],
+        [{"content": c.content, "section": getattr(c, "section_heading", None)} for c in chunks],
         ensure_ascii=False,
     )
     prompt = _CITATION_ACCURACY_PROMPT.format(answer=answer, chunks_json=chunks_json)
@@ -88,7 +96,10 @@ async def run_online_eval(
             if citation_accuracy is not None:
                 scores["citation_accuracy"] = citation_accuracy
 
+            span.attributes["scores"] = scores
             span.attributes["scores_json"] = json.dumps(scores)
+            if not scores:
+                span.attributes["error"] = "Judge model rate-limited, timed out, or output unparseable float"
             return scores if scores else None
     else:
         faithfulness = await judge_faithfulness(query, answer, chunks)

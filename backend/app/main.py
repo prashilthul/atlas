@@ -28,9 +28,6 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         logger.info("No DATABASE_URL configured — skipping DB check on startup.")
 
-    from app.services.embedder import warmup_embedder
-
-    warmup_embedder()
     yield
     logger.info("Shutting down Paper Pilot backend…")
     if engine is not None:

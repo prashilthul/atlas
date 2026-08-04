@@ -50,8 +50,10 @@ class PaperStatus(BaseModel):
 
 
 class SectionInfo(BaseModel):
+    id: str | None = None
     heading: str
     level: int
+    content: str | None = None
     order_index: int
 
 
@@ -82,4 +84,6 @@ class PaperDetailResponse(BaseModel):
     source_url: str | None
     status: str
     created_at: str
+    chunk_count: int = 0
+    section_count: int = 0
     sections: list[SectionInfo]

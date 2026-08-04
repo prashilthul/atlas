@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from uuid import UUID
 
@@ -6,7 +7,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import _get_session_factory, get_db
-from app.models import Chunk, Paper, PaperSection
+from app.models import Chunk, Citation, Paper, PaperSection
+
 from app.schemas import (
     PaperDetailResponse,
     PaperListItem,
@@ -23,11 +25,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/papers", tags=["papers"])
 
-
 @router.post("/upload", response_model=PaperResponse, status_code=201)
 async def upload_paper(
+    bg_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    bg_tasks: BackgroundTasks = BackgroundTasks(),
     db: AsyncSession = Depends(get_db),
 ):
     if not _is_pdf(file):
@@ -62,6 +63,16 @@ async def upload_paper(
         db.add(sec)
         section_records.append(sec)
     await db.flush()
+
+    # Persist extracted citations
+    for cit in paper_schema.citations:
+        citation_rec = Citation(
+            paper_id=paper.id,
+            marker=cit.marker,
+            context=cit.context,
+            cited_title=cit.marker,
+        )
+        db.add(citation_rec)
 
     heading_to_section_id = {}
     for sec_schema, sec_record in zip(paper_schema.sections, section_records):
@@ -206,6 +217,12 @@ async def get_paper(
     )
     sections = sections_result.scalars().all()
 
+    chunk_count = (
+        await db.execute(
+            select(func.count()).select_from(Chunk).where(Chunk.paper_id == paper_id)
+        )
+    ).scalar() or 0
+
     return PaperDetailResponse(
         id=str(paper.id),
         title=paper.title,
@@ -215,10 +232,14 @@ async def get_paper(
         source_url=paper.source_url,
         status=paper.status,
         created_at=paper.created_at.isoformat(),
+        chunk_count=chunk_count,
+        section_count=len(sections),
         sections=[
             SectionInfo(
+                id=str(s.id),
                 heading=s.heading,
                 level=s.level,
+                content=s.content,
                 order_index=s.order_index,
             )
             for s in sections
@@ -260,7 +281,7 @@ async def _embed_and_update(paper_id: UUID) -> None:
                 for c in chunks
             ]
 
-            embeddings = embed_chunks(chunk_data_list)
+            embeddings = await asyncio.to_thread(embed_chunks, chunk_data_list)
 
             for chunk, emb in zip(chunks, embeddings):
                 stmt = update(Chunk).where(Chunk.id == chunk.id).values(embedding=emb)

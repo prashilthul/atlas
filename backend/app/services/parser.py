@@ -209,24 +209,25 @@ def _section_level(text: str, font_size: float, body_size: float) -> int:
 
 def _extract_sections(blocks: list[_Block], body_size: float, threshold: float, abstract_end: int) -> list[SectionSchema]:
     sections: list[SectionSchema] = []
-    current_heading = ""
+    current_heading = "Document Content"
     current_level = 1
     current_content: list[str] = []
     order = 0
 
     def flush() -> None:
         nonlocal order
-        if current_heading:
+        if current_heading and current_content:
             content = " ".join(current_content).strip()
-            sections.append(
-                SectionSchema(
-                    heading=current_heading,
-                    level=current_level,
-                    content=content,
-                    order_index=order,
+            if content:
+                sections.append(
+                    SectionSchema(
+                        heading=current_heading,
+                        level=current_level,
+                        content=content,
+                        order_index=order,
+                    )
                 )
-            )
-            order += 1
+                order += 1
 
     for i, b in enumerate(blocks):
         if i <= abstract_end:
@@ -249,8 +250,7 @@ def _extract_sections(blocks: list[_Block], body_size: float, threshold: float, 
             current_level = _section_level(text, b.font_size, body_size)
             current_content = []
         else:
-            if current_heading:
-                current_content.append(text)
+            current_content.append(text)
 
     flush()
     return sections

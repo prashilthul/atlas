@@ -19,10 +19,18 @@ _SYSTEM_PROMPT = (
     "Answer the user's question based ONLY on the provided paper excerpts. "
     "Cite sources using [1], [2] markers corresponding to the provided chunks. "
     "If the context doesn't contain enough information to answer, "
-    "say 'The provided paper excerpts do not contain information about this.'"
+    "say 'The provided paper excerpts do not contain information about this.' "
+    "If the user quotes or pastes a passage and asks to complete, continue, or "
+    "reproduce it, quote the continuation verbatim from the excerpts rather than paraphrasing."
 )
 
-_MARKER_PATTERN = re.compile(r"\[(\d+)\]")
+_GENERAL_SYSTEM_PROMPT = (
+    "You are Paper Pilot, an AI assistant for research paper Q&A. "
+    "Respond conversationally and introduce yourself. Explain that users can upload PDF research papers and ask questions to get grounded answers with section citations. "
+    "If they ask a specific question without uploading a paper, answer politely and suggest uploading a PDF paper for section citations."
+)
+
+_MARKER_PATTERN = re.compile(r"[\[【](\d+)[\]】]")
 
 
 @dataclass
@@ -82,17 +90,31 @@ async def generate(
     temperature: float = 0.1,
     tracer: Tracer | None = None,
 ) -> GenerationResult:
-    if not query or not chunks:
+    if not query:
+        return GenerationResult(answer="Please enter a question.", finish_reason="no_input")
+
+    if not chunks:
         if tracer:
             async with tracer.span(
                 "generate",
-                attributes={"model": model, "input_tokens": 0, "output_tokens": 0, "finish_reason": "no_input", "context_truncated": False, "context_token_count": 0},
+                attributes={"model": model, "input_tokens": 0, "output_tokens": 0, "finish_reason": "general_chat", "context_truncated": False, "context_token_count": 0},
             ):
                 pass
-        return GenerationResult(
-            answer="The provided paper excerpts do not contain information about this.",
-            finish_reason="no_input",
-        )
+        try:
+            llm = ChatOpenAI(
+                model=model,
+                openai_api_key=settings.OPENROUTER_API_KEY,
+                openai_api_base=_BASE,
+                temperature=temperature,
+                max_tokens=512,
+            )
+            response = llm.invoke([SystemMessage(content=_GENERAL_SYSTEM_PROMPT), HumanMessage(content=query)])
+            return GenerationResult(answer=str(response.content), finish_reason="general_chat")
+        except Exception:
+            return GenerationResult(
+                answer="Hello! I am Paper Pilot, your AI research paper assistant. Upload a PDF paper to ask questions with section citations.",
+                finish_reason="fallback",
+            )
 
     context = _build_context(chunks)
     context_token_count = max(1, len(context) // 4)
@@ -165,9 +187,10 @@ async def stream_generate(
     chunks: list[ChunkResult],
     model: str = "openrouter/free",
     temperature: float = 0.1,
+    session_id: str | None = None,
     tracer: Tracer | None = None,
 ) -> AsyncGenerator[str, None]:
     from app.services.streamer import stream_generate as _sg
 
-    async for event in _sg(query, chunks, model, temperature, tracer):
+    async for event in _sg(query, chunks, model, temperature, session_id, tracer):
         yield event

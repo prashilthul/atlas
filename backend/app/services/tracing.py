@@ -2,7 +2,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 @dataclass
@@ -50,8 +50,23 @@ class Tracer:
                 parent_span_id=s.parent_span_id,
                 name=s.name,
                 attributes=s.attributes,
-                start_time=datetime.fromtimestamp(s.start_time / 1_000_000_000),
-                end_time=datetime.fromtimestamp(s.end_time / 1_000_000_000) if s.end_time else None,
+                start_time=datetime.fromtimestamp(s.start_time / 1_000_000_000, tz=UTC).replace(tzinfo=None),
+                end_time=datetime.fromtimestamp(s.end_time / 1_000_000_000, tz=UTC).replace(tzinfo=None) if s.end_time else None,
                 duration_ms=s.duration_ms,
             ))
         await db.flush()
+
+    def get_trace_spans_summary(self) -> list[dict]:
+        summary = []
+        for s in self.spans:
+            is_error = s.attributes and (s.attributes.get("finish_reason") == "error" or s.attributes.get("fallback") is True)
+            status = "error" if is_error else "ok"
+            summary.append({
+                "span_id": s.span_id,
+                "name": s.name,
+                "start_time_ns": s.start_time,
+                "duration_ms": s.duration_ms or 0,
+                "status": status,
+                "attributes": s.attributes or {},
+            })
+        return summary

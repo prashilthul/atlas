@@ -34,7 +34,7 @@ async def rerank(
             attributes={"model": "nvidia/llama-nemotron-rerank-vl-1b-v2:free", "input_count": input_count},
         ) as span:
             try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
+                async with httpx.AsyncClient(timeout=15.0) as client:
                     resp = await client.post(
                         f"{_BASE}/rerank",
                         headers={
@@ -54,25 +54,45 @@ async def rerank(
                 results = data.get("results")
                 if not results:
                     span.attributes["output_count"] = 0
+                    span.attributes["fallback"] = True
                     return chunks[:top_k]
 
                 index_to_chunk = {i: c for i, c in enumerate(chunks)}
                 reranked: list[ChunkResult] = []
-                for r in sorted(results, key=lambda x: x.get("relevance_score", 0), reverse=True):
-                    idx = r.get("index")
-                    if idx is not None and idx in index_to_chunk:
-                        reranked.append(index_to_chunk[idx])
+                reranked_meta = []
+
+                sorted_results = sorted(results, key=lambda x: x.get("relevance_score", 0), reverse=True)
+                for post_rank, r in enumerate(sorted_results):
+                    orig_idx = r.get("index")
+                    rel_score = float(r.get("relevance_score", 0.0))
+                    if orig_idx is not None and orig_idx in index_to_chunk:
+                        chk = index_to_chunk[orig_idx]
+                        reranked.append(chk)
+                        if post_rank < top_k:
+                            reranked_meta.append({
+                                "chunk_id": chk.chunk_id,
+                                "section_heading": chk.section_heading or "Unheaded Section",
+                                "pre_rank": orig_idx + 1,
+                                "post_rank": post_rank + 1,
+                                "rank_change": (orig_idx + 1) - (post_rank + 1),  # positive = promoted
+                                "relevance_score": round(rel_score, 4),
+                                "vector_score": round(chk.score, 4),
+                                "snippet": chk.content[:150],
+                            })
 
                 output = reranked[:top_k]
                 span.attributes["output_count"] = len(output)
+                span.attributes["fallback"] = False
+                span.attributes["reranked_chunks"] = reranked_meta
                 return output
-            except Exception:
-                logger.warning("reranker unavailable, falling back to vector search order")
-                span.attributes["output_count"] = 0
+            except Exception as exc:
+                logger.warning("reranker unavailable, falling back to vector search order: %s", exc)
+                span.attributes["output_count"] = min(top_k, len(chunks))
+                span.attributes["fallback"] = True
                 return chunks[:top_k]
     else:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.post(
                     f"{_BASE}/rerank",
                     headers={

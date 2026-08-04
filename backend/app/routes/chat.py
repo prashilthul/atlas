@@ -3,10 +3,10 @@ import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sse_starlette.sse import EventSourceResponse
 
 from app.config import settings
 from app.database import get_db
@@ -42,16 +42,17 @@ async def chat(
     req: ChatRequest,
     db: AsyncSession = Depends(get_db),
 ):
+    session_id = None
     if req.session_id:
         try:
             sid = UUID(req.session_id)
+            result = await db.execute(select(ChatSession).where(ChatSession.id == sid))
+            if result.scalar_one_or_none():
+                session_id = sid
         except ValueError:
-            raise HTTPException(400, "Invalid session ID")
-        result = await db.execute(select(ChatSession).where(ChatSession.id == sid))
-        if not result.scalar_one_or_none():
-            raise HTTPException(404, "Session not found")
-        session_id = sid
-    else:
+            pass
+
+    if not session_id:
         session = ChatSession(title=req.query[:80])
         db.add(session)
         await db.flush()
@@ -65,21 +66,37 @@ async def chat(
     chunks = await rerank(query=req.query, chunks=chunks, top_k=5, tracer=tracer)
 
     if req.stream:
-        return EventSourceResponse(
-            _stream_and_store(req.query, chunks, session_id, db, tracer, evaluate)
+        return StreamingResponse(
+            _stream_and_store(req.query, chunks, session_id, db, tracer, evaluate),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
         )
 
-    result = await generate(query=req.query, chunks=chunks, tracer=tracer)
-    scores = await run_online_eval(req.query, result.answer, chunks, tracer=tracer) if evaluate else None
+    error_occurred = False
+    try:
+        result = await generate(query=req.query, chunks=chunks, tracer=tracer)
+        answer_text = result.answer
+        citations_data = [c.__dict__ for c in result.citations] if result.citations else None
+    except Exception as e:
+        error_occurred = True
+        answer_text = f"An error occurred while generating response: {e}"
+        citations_data = None
+
+    scores = await run_online_eval(req.query, answer_text, chunks, error_occurred=error_occurred, tracer=tracer) if evaluate else None
 
     db.add(ChatMessage(session_id=session_id, role="user", content=req.query))
     db.add(
         ChatMessage(
             session_id=session_id,
             role="assistant",
-            content=result.answer,
-            citations=[c.__dict__ for c in result.citations] if result.citations else None,
+            content=answer_text,
+            citations=citations_data,
             eval_scores=scores,
+            trace_id=tracer.trace_id,
         )
     )
     await tracer.store(db)
@@ -87,8 +104,8 @@ async def chat(
 
     return ChatResponse(
         session_id=str(session_id),
-        answer=result.answer,
-        citations=[c.__dict__ for c in result.citations],
+        answer=answer_text,
+        citations=citations_data or [],
         trace_id=tracer.trace_id,
     )
 
@@ -106,38 +123,69 @@ async def _stream_and_store(
 
     full_text = ""
     final_citations = None
+    error_occurred = False
 
-    async for event_str in stream_generate(query, chunks, tracer=tracer):
-        yield event_str
+    try:
+        async for event_str in stream_generate(
+            query, chunks, session_id=str(session_id), tracer=tracer
+        ):
+            yield event_str
 
-        lines = event_str.strip().split("\n")
-        event_type = ""
-        for line in lines:
-            if line.startswith("event: "):
-                event_type = line[7:]
-            elif line.startswith("data: ") and event_type == "token":
-                payload = json.loads(line[6:])
-                full_text += payload.get("text", "")
-            elif line.startswith("data: ") and event_type == "done":
-                payload = json.loads(line[6:])
-                final_citations = payload.get("citations")
-
-    if full_text:
-        scores = await run_online_eval(query, full_text, chunks, tracer=tracer) if evaluate else None
+            lines = event_str.strip().split("\n")
+            event_type = ""
+            for line in lines:
+                if line.startswith("event: "):
+                    event_type = line[7:]
+                    if event_type == "error":
+                        error_occurred = True
+                elif line.startswith("data: ") and event_type == "token":
+                    payload = json.loads(line[6:])
+                    full_text += payload.get("text", "")
+                elif line.startswith("data: ") and event_type == "done":
+                    payload = json.loads(line[6:])
+                    final_citations = payload.get("citations")
+    except Exception as e:
+        error_occurred = True
+        logger.exception("Error during SSE stream: %s", e)
+    finally:
+        content_to_save = full_text or "Sorry, an error occurred during response generation."
+        scores = await run_online_eval(query, content_to_save, chunks, error_occurred=error_occurred, tracer=tracer) if evaluate else None
         db.add(
             ChatMessage(
                 session_id=session_id,
                 role="assistant",
-                content=full_text,
+                content=content_to_save,
                 citations=final_citations,
                 eval_scores=scores,
+                trace_id=tracer.trace_id,
             )
         )
-    await tracer.store(db)
-    await db.commit()
+        await tracer.store(db)
+        await db.commit()
 
 
-@router.get("/sessions/{session_id}")
+@router.get("/chat/sessions")
+async def list_sessions(
+    db: AsyncSession = Depends(get_db),
+):
+    sessions = (
+        await db.execute(
+            select(ChatSession)
+            .order_by(ChatSession.created_at.desc())
+        )
+    ).scalars().all()
+
+    return [
+        {
+            "id": str(s.id),
+            "title": s.title,
+            "created_at": s.created_at.isoformat(),
+        }
+        for s in sessions
+    ]
+
+
+@router.get("/chat/sessions/{session_id}")
 async def get_session(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -170,3 +218,28 @@ async def get_session(
             for m in msgs
         ],
     }
+
+
+@router.delete("/chat/sessions/{session_id}")
+async def delete_session(
+    session_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    session = (
+        await db.execute(select(ChatSession).where(ChatSession.id == session_id))
+    ).scalar_one_or_none()
+
+    if not session:
+        raise HTTPException(404, "Session not found")
+
+    # Delete associated messages
+    msgs = (
+        await db.execute(select(ChatMessage).where(ChatMessage.session_id == session_id))
+    ).scalars().all()
+    for m in msgs:
+        await db.delete(m)
+
+    await db.delete(session)
+    await db.commit()
+    return {"status": "deleted", "id": str(session_id)}
+

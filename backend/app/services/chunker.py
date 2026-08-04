@@ -72,13 +72,27 @@ def _chunk_section_content(
         chunk_sentences: list[str] = list(overlap_sentences)
         tokens = heading_tokens + sum(_num_tokens(s) for s in chunk_sentences)
 
-        # Add sentences until token limit
+        added_any = False
         while sent_idx < len(sentences):
-            s_tokens = _num_tokens(sentences[sent_idx])
+            s_text = sentences[sent_idx]
+            s_tokens = _num_tokens(s_text)
+
             if tokens + s_tokens > _MAX_TOKENS:
+                if not chunk_sentences:
+                    # Single sentence exceeds token budget; force slice it so sent_idx advances
+                    sliced_text = s_text[:1500]
+                    chunk_sentences.append(sliced_text)
+                    sent_idx += 1
+                    added_any = True
                 break
-            chunk_sentences.append(sentences[sent_idx])
+
+            chunk_sentences.append(s_text)
             tokens += s_tokens
+            sent_idx += 1
+            added_any = True
+
+        if not added_any and sent_idx < len(sentences):
+            chunk_sentences.append(sentences[sent_idx][:1000])
             sent_idx += 1
 
         chunk_text = f"{heading}\n{' '.join(chunk_sentences)}"

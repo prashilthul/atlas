@@ -83,6 +83,7 @@ class ChatMessage(Base):
     )
     role: Mapped[str] = mapped_column(String, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    trace_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     citations: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     eval_scores: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)

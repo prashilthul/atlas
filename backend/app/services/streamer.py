@@ -11,6 +11,8 @@ from app.services.generator import _SYSTEM_PROMPT, _build_context, _extract_cita
 from app.services.retriever import ChunkResult
 from app.services.tracing import Tracer
 
+from app.services.chunker import _num_tokens
+
 logger = logging.getLogger(__name__)
 
 _BASE = settings.OPENROUTER_BASE_URL or "https://openrouter.ai/api/v1"
@@ -21,21 +23,56 @@ async def stream_generate(
     chunks: list[ChunkResult],
     model: str = "openrouter/free",
     temperature: float = 0.1,
+    session_id: str | None = None,
     tracer: Tracer | None = None,
 ) -> AsyncGenerator[str, None]:
     trace_id = tracer.trace_id if tracer else str(uuid.uuid4())
 
-    if not query or not chunks:
+    if not query:
+        yield f"event: token\ndata: {json.dumps({'text': 'Please enter a question.'})}\n\n"
+        yield f"event: done\ndata: {json.dumps({'citations': [], 'trace_id': trace_id, 'session_id': session_id})}\n\n"
+        return
+
+    if not chunks:
         if tracer:
             async with tracer.span(
                 "generate",
-                attributes={"model": model, "input_tokens": 0, "output_tokens": 0, "finish_reason": "no_input", "context_truncated": False, "context_token_count": 0},
+                attributes={"model": model, "input_tokens": 0, "output_tokens": 0, "finish_reason": "general_chat", "context_truncated": False, "context_token_count": 0},
             ):
                 pass
-        no_info_text = "The provided paper excerpts do not contain information about this."
-        yield f"event: token\ndata: {json.dumps({'text': no_info_text})}\n\n"
-        yield f"event: done\ndata: {json.dumps({'citations': [], 'trace_id': trace_id})}\n\n"
-        return
+
+        _GENERAL_SYSTEM_PROMPT = (
+            "You are Paper Pilot, an AI assistant for research paper Q&A. "
+            "Respond conversationally and introduce yourself. Explain that users can upload PDF research papers and ask questions to get grounded answers with section citations. "
+            "If they ask a specific question without uploading a paper, answer politely and suggest uploading a PDF paper for section citations."
+        )
+
+        try:
+            llm = ChatOpenAI(
+                model=model,
+                openai_api_key=settings.OPENROUTER_API_KEY,
+                openai_api_base=_BASE,
+                temperature=temperature,
+                max_tokens=512,
+                streaming=True,
+            )
+            messages = [
+                SystemMessage(content=_GENERAL_SYSTEM_PROMPT),
+                HumanMessage(content=query),
+            ]
+            async for chunk in llm.astream(messages):
+                token = chunk.content or ""
+                if token:
+                    yield f"event: token\ndata: {json.dumps({'text': token})}\n\n"
+            spans_summary = tracer.get_trace_spans_summary() if tracer else []
+            yield f"event: done\ndata: {json.dumps({'citations': [], 'trace_id': trace_id, 'trace_spans': spans_summary, 'session_id': session_id})}\n\n"
+            return
+        except Exception:
+            no_info_text = "Hello! I am Paper Pilot, your AI research paper assistant. Upload a PDF paper to ask questions with section citations."
+            spans_summary = tracer.get_trace_spans_summary() if tracer else []
+            yield f"event: token\ndata: {json.dumps({'text': no_info_text})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'citations': [], 'trace_id': trace_id, 'trace_spans': spans_summary, 'session_id': session_id})}\n\n"
+            return
 
     context = _build_context(chunks)
     context_token_count = max(1, len(context) // 4)
@@ -67,26 +104,33 @@ async def stream_generate(
         ) as span:
             full_text = ""
             output_token_count = 0
+            stream_error: Exception | None = None
 
             try:
                 async for chunk in llm.astream(messages):
                     token = chunk.content or ""
                     if token:
                         full_text += token
-                        output_token_count += 1
+                        output_token_count += _num_tokens(token)
                         yield f"event: token\ndata: {json.dumps({'text': token})}\n\n"
-
-                citations = _extract_citations(full_text, chunks)
-                span.attributes["output_tokens"] = output_token_count
-                span.attributes["finish_reason"] = "stop"
-                yield f"event: done\ndata: {json.dumps({'citations': [c.__dict__ for c in citations], 'trace_id': trace_id})}\n\n"
-
             except Exception as e:
                 logger.warning("stream generation failed: %s", e)
                 span.attributes["finish_reason"] = "error"
-                yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
+                stream_error = e
+
+            citations = _extract_citations(full_text, chunks)
+            if not stream_error:
+                span.attributes["output_tokens"] = output_token_count
+                span.attributes["finish_reason"] = "stop"
+
+        spans_summary = tracer.get_trace_spans_summary()
+        if stream_error:
+            yield f"event: error\ndata: {json.dumps({'message': str(stream_error)})}\n\n"
+        else:
+            yield f"event: done\ndata: {json.dumps({'citations': [c.__dict__ for c in citations], 'trace_id': trace_id, 'trace_spans': spans_summary, 'session_id': session_id})}\n\n"
     else:
         full_text = ""
+        stream_error: Exception | None = None
 
         try:
             async for chunk in llm.astream(messages):
@@ -94,10 +138,13 @@ async def stream_generate(
                 if token:
                     full_text += token
                     yield f"event: token\ndata: {json.dumps({'text': token})}\n\n"
-
-            citations = _extract_citations(full_text, chunks)
-            yield f"event: done\ndata: {json.dumps({'citations': [c.__dict__ for c in citations], 'trace_id': trace_id})}\n\n"
-
         except Exception as e:
             logger.warning("stream generation failed: %s", e)
-            yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
+            stream_error = e
+
+        citations = _extract_citations(full_text, chunks)
+        spans_summary = tracer.get_trace_spans_summary() if tracer else []
+        if stream_error:
+            yield f"event: error\ndata: {json.dumps({'message': str(stream_error)})}\n\n"
+        else:
+            yield f"event: done\ndata: {json.dumps({'citations': [c.__dict__ for c in citations], 'trace_id': trace_id, 'trace_spans': spans_summary, 'session_id': session_id})}\n\n"

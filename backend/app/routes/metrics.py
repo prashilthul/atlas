@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.services.metrics import (
     get_health_score,
+    get_low_scoring_queries,
     get_per_paper_stats,
     get_timeseries,
 )
@@ -41,3 +42,11 @@ async def metrics_timeseries(
     days = _parse_range(range)
     data = await get_timeseries(db, range_days=days)
     return {"range_days": days, "data": data}
+
+
+@router.get("/low-scoring-queries")
+async def metrics_low_scoring_queries(
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_low_scoring_queries(db, limit=limit)

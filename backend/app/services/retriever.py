@@ -23,7 +23,7 @@ async def retrieve(
     query: str,
     paper_ids: list[str] | None = None,
     top_k: int = 10,
-    score_threshold: float = 0.4,
+    score_threshold: float = 0.0,
     db: AsyncSession | None = None,
     tracer: Tracer | None = None,
 ) -> list[ChunkResult]:
@@ -51,15 +51,15 @@ async def retrieve(
 
     try:
         params: dict = {
-            "query_vec": query_vec,
+            "query_vec": str(query_vec),
             "threshold": score_threshold,
             "top_k": top_k,
         }
 
         if paper_ids:
             stmt = text("""
-                SELECT c.id, c.paper_id, c.meta_data ->> 'section_heading' as section_heading,
-                       c.content, c.meta_data, 1 - (c.embedding <=> :query_vec) AS score
+                SELECT c.id, c.paper_id, c.metadata ->> 'section_heading' as section_heading,
+                       c.content, c.metadata, 1 - (c.embedding <=> :query_vec) AS score
                 FROM chunks c
                 WHERE c.paper_id = ANY(:paper_ids)
                   AND 1 - (c.embedding <=> :query_vec) >= :threshold
@@ -69,8 +69,8 @@ async def retrieve(
             params["paper_ids"] = [UUID(pid) for pid in paper_ids]
         else:
             stmt = text("""
-                SELECT c.id, c.paper_id, c.meta_data ->> 'section_heading' as section_heading,
-                       c.content, c.meta_data, 1 - (c.embedding <=> :query_vec) AS score
+                SELECT c.id, c.paper_id, c.metadata ->> 'section_heading' as section_heading,
+                       c.content, c.metadata, 1 - (c.embedding <=> :query_vec) AS score
                 FROM chunks c
                 WHERE 1 - (c.embedding <=> :query_vec) >= :threshold
                 ORDER BY score DESC

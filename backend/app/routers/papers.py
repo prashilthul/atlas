@@ -9,6 +9,7 @@ from app.database import _get_session_factory, get_db
 from app.models import Chunk, Paper, PaperSection
 from app.schemas import (
     PaperDetailResponse,
+    PaperListItem,
     PaperListResponse,
     PaperResponse,
     PaperStatus,

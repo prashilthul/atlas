@@ -8,9 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+from app.config import settings
 from app.database import get_db
 from app.models import ChatMessage, ChatSession
 from app.services.generator import generate, stream_generate
+from app.services.online_eval import run_online_eval
 from app.services.reranker import rerank
 from app.services.retriever import retrieve
 from app.services.tracing import Tracer
@@ -25,6 +27,7 @@ class ChatRequest(BaseModel):
     paper_ids: list[str] | None = None
     session_id: str | None = None
     stream: bool = False
+    evaluate: bool | None = None
 
 
 class ChatResponse(BaseModel):
@@ -56,13 +59,18 @@ async def chat(
 
     tracer = Tracer()
 
+    evaluate = settings.ENABLE_ONLINE_EVAL if req.evaluate is None else req.evaluate
+
     chunks = await retrieve(query=req.query, paper_ids=req.paper_ids, top_k=20, db=db, tracer=tracer)
     chunks = await rerank(query=req.query, chunks=chunks, top_k=5, tracer=tracer)
 
     if req.stream:
-        return EventSourceResponse(_stream_and_store(req.query, chunks, session_id, db, tracer))
+        return EventSourceResponse(
+            _stream_and_store(req.query, chunks, session_id, db, tracer, evaluate)
+        )
 
     result = await generate(query=req.query, chunks=chunks, tracer=tracer)
+    scores = await run_online_eval(req.query, result.answer, chunks, tracer=tracer) if evaluate else None
 
     db.add(ChatMessage(session_id=session_id, role="user", content=req.query))
     db.add(
@@ -71,6 +79,7 @@ async def chat(
             role="assistant",
             content=result.answer,
             citations=[c.__dict__ for c in result.citations] if result.citations else None,
+            eval_scores=scores,
         )
     )
     await tracer.store(db)
@@ -90,6 +99,7 @@ async def _stream_and_store(
     session_id: UUID,
     db: AsyncSession,
     tracer: Tracer,
+    evaluate: bool,
 ):
     db.add(ChatMessage(session_id=session_id, role="user", content=query))
     await db.flush()
@@ -113,12 +123,14 @@ async def _stream_and_store(
                 final_citations = payload.get("citations")
 
     if full_text:
+        scores = await run_online_eval(query, full_text, chunks, tracer=tracer) if evaluate else None
         db.add(
             ChatMessage(
                 session_id=session_id,
                 role="assistant",
                 content=full_text,
                 citations=final_citations,
+                eval_scores=scores,
             )
         )
     await tracer.store(db)

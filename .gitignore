@@ -5,6 +5,7 @@ __pycache__/
 *.egg-info/
 dist/
 
+.omo/*
 # Node
 node_modules/
 .next/

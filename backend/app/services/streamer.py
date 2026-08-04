@@ -32,6 +32,8 @@ async def stream_generate(
                 attributes={"model": model, "input_tokens": 0, "output_tokens": 0, "finish_reason": "no_input", "context_truncated": False, "context_token_count": 0},
             ):
                 pass
+        no_info_text = "The provided paper excerpts do not contain information about this."
+        yield f"event: token\ndata: {json.dumps({'text': no_info_text})}\n\n"
         yield f"event: done\ndata: {json.dumps({'citations': [], 'trace_id': trace_id})}\n\n"
         return
 

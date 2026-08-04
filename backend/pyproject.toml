@@ -28,6 +28,7 @@ dependencies = [
     "python-multipart>=0.0.32",
     "ragas>=0.4.3",
     "datasets>=5.0.1",
+    "torch>=2.13.0",
 ]
 
 [dependency-groups]
@@ -36,6 +37,9 @@ dev = ["ruff"]
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+
+[[tool.uv.index]]
+url = "https://download.pytorch.org/whl/cpu"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "W"]

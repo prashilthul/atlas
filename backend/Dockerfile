@@ -1,15 +1,14 @@
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-RUN curl -sSL https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.local/bin:${PATH}"
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 RUN adduser --disabled-password --gecos "" appuser
 
 WORKDIR /app
-COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev
+COPY pyproject.toml uv.lock alembic.ini ./
+RUN uv sync --frozen --no-dev && uv cache clean
 COPY app/ app/
+COPY alembic/ alembic/
 COPY scripts/ scripts/
 RUN chown -R appuser:appuser /app
 

@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 revision: str = "add_span_id"
-down_revision: Union[str, None] = "initial"
+down_revision: Union[str, None] = "add_paper_status"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

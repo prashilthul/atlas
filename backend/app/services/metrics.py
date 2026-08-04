@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +9,7 @@ async def get_latency_percentiles(
     step: str | None = None,
     hours: int = 24,
 ) -> list[dict]:
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=hours)
 
     params = {"cutoff": cutoff}
     step_filter = ""
@@ -46,7 +46,7 @@ async def get_latency_percentiles(
 
 
 async def get_empty_result_rate(db: AsyncSession, hours: int = 24) -> float:
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=hours)
 
     row = await db.execute(
         text("""
@@ -120,7 +120,7 @@ async def get_health_score(db: AsyncSession) -> dict:
 
 
 async def get_timeseries(db: AsyncSession, range_days: int = 7) -> list[dict]:
-    cutoff = datetime.now(timezone.utc) - timedelta(days=range_days)
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=range_days)
 
     rows = await db.execute(
         text("""
@@ -200,3 +200,52 @@ async def get_per_paper_stats(db: AsyncSession) -> list[dict]:
         }
         for r in rows
     ]
+
+
+async def get_low_scoring_queries(
+    db: AsyncSession,
+    limit: int = 20,
+    threshold: float = 0.8,
+) -> list[dict]:
+    rows = await db.execute(
+        text(r"""
+            SELECT
+                m.content AS query,
+                m.created_at AS timestamp,
+                COALESCE(
+                    (follow.eval_scores->>'citation_accuracy')::float,
+                    (
+                        SELECT AVG((x.value)::float)
+                        FROM jsonb_each_text(follow.eval_scores) AS x
+                        WHERE x.value ~ '^[-+]?[0-9]*\.?[0-9]+$'
+                    )
+                ) AS score
+            FROM chat_messages m
+            CROSS JOIN LATERAL (
+                SELECT cm.eval_scores
+                FROM chat_messages cm
+                WHERE cm.session_id = m.session_id
+                  AND cm.role = 'assistant'
+                  AND cm.id > m.id
+                  AND cm.eval_scores IS NOT NULL
+                ORDER BY cm.id ASC
+                LIMIT 1
+            ) AS follow
+            WHERE m.role = 'user'
+        """),
+    )
+
+    low = []
+    for r in rows:
+        if r.score is None or r.score >= threshold:
+            continue
+        low.append(
+            {
+                "query": r.query,
+                "score": round(r.score, 4),
+                "timestamp": r.timestamp.isoformat(),
+            }
+        )
+
+    low.sort(key=lambda x: x["timestamp"], reverse=True)
+    return low[:limit]

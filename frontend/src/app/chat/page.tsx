@@ -271,6 +271,7 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [evaluationEnabled, setEvaluationEnabled] = useState(true);
   const [expandedTraces, setExpandedTraces] = useState<Set<string>>(
     new Set()
   );
@@ -332,6 +333,7 @@ export default function ChatPage() {
             paper_ids: paperIds,
             session_id: sessionId,
             stream: true,
+            evaluate: evaluationEnabled,
           }),
           signal: controller.signal,
         });
@@ -418,7 +420,7 @@ export default function ChatPage() {
         inputRef.current?.focus();
       }
     },
-    [sending, paperIds, sessionId]
+    [sending, paperIds, sessionId, evaluationEnabled]
   );
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -532,6 +534,20 @@ export default function ChatPage() {
         {/* Input */}
         <div className="border-t border-border px-4 py-3">
           <form onSubmit={handleSubmit} className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={evaluationEnabled ? "default" : "outline"}
+              onClick={() => setEvaluationEnabled((v) => !v)}
+              disabled={sending}
+              title={
+                evaluationEnabled
+                  ? "Online evaluation is on — click to disable"
+                  : "Online evaluation is off — click to enable"
+              }
+            >
+              {evaluationEnabled ? "Eval on" : "Eval off"}
+            </Button>
             <Input
               ref={inputRef}
               value={input}

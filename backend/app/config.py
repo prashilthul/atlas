@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = ""
     LOG_LEVEL: str = "INFO"
     JUDGE_MODEL: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
+    ENABLE_ONLINE_EVAL: bool = True
 
     model_config = {"env_file": ".env"}
 

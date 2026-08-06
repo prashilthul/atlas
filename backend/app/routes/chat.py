@@ -13,6 +13,7 @@ from app.database import get_db
 from app.models import ChatMessage, ChatSession
 from app.services.generator import generate, stream_generate
 from app.services.online_eval import run_online_eval
+from app.services.query_rewriter import rewrite_query, should_rewrite
 from app.services.reranker import rerank
 from app.services.retriever import retrieve
 from app.services.tracing import Tracer
@@ -62,7 +63,24 @@ async def chat(
 
     evaluate = settings.ENABLE_ONLINE_EVAL if req.evaluate is None else req.evaluate
 
-    chunks = await retrieve(query=req.query, paper_ids=req.paper_ids, top_k=20, db=db, tracer=tracer)
+    retrieval_query = req.query
+    if session_id:
+        history_rows = (
+            await db.execute(
+                select(ChatMessage)
+                .where(ChatMessage.session_id == session_id)
+                .order_by(ChatMessage.created_at)
+            )
+        ).scalars().all()
+        history = [(m.role, m.content) for m in history_rows]
+        if should_rewrite(req.query, history):
+            async with tracer.span(
+                "query_rewrite", attributes={"original": req.query}
+            ) as span:
+                retrieval_query = await rewrite_query(req.query, history)
+                span.attributes["rewritten"] = retrieval_query
+
+    chunks = await retrieve(query=retrieval_query, paper_ids=req.paper_ids, top_k=20, db=db, tracer=tracer)
     chunks = await rerank(query=req.query, chunks=chunks, top_k=5, tracer=tracer)
 
     if req.stream:
@@ -86,7 +104,11 @@ async def chat(
         answer_text = f"An error occurred while generating response: {e}"
         citations_data = None
 
-    scores = await run_online_eval(req.query, answer_text, chunks, error_occurred=error_occurred, tracer=tracer) if evaluate else None
+    scores = (
+        await run_online_eval(req.query, answer_text, chunks, error_occurred=error_occurred, tracer=tracer)
+        if evaluate
+        else None
+    )
 
     db.add(ChatMessage(session_id=session_id, role="user", content=req.query))
     db.add(
@@ -149,7 +171,11 @@ async def _stream_and_store(
         logger.exception("Error during SSE stream: %s", e)
     finally:
         content_to_save = full_text or "Sorry, an error occurred during response generation."
-        scores = await run_online_eval(query, content_to_save, chunks, error_occurred=error_occurred, tracer=tracer) if evaluate else None
+        scores = (
+            await run_online_eval(query, content_to_save, chunks, error_occurred=error_occurred, tracer=tracer)
+            if evaluate
+            else None
+        )
         db.add(
             ChatMessage(
                 session_id=session_id,

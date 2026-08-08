@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import _get_session_factory, get_db
 from app.models import Chunk, Citation, Paper, PaperSection
-
 from app.schemas import (
     PaperDetailResponse,
     PaperListItem,
@@ -86,6 +85,7 @@ async def upload_paper(
             paper_id=paper.id,
             section_id=heading_to_section_id.get(cd.section_heading),
             content=cd.content,
+            parent_content=cd.parent_content,
             embedding=placeholder,
             meta_data={
                 "section_heading": cd.section_heading,

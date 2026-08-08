@@ -8,6 +8,8 @@ from app.schemas import SectionSchema
 _ENCODING = tiktoken.get_encoding("cl100k_base")
 _MAX_TOKENS = 512
 _OVERLAP_TOKENS = 64
+_SMALL_MAX_TOKENS = 128
+_SMALL_OVERLAP_TOKENS = 32
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
@@ -20,10 +22,58 @@ class ChunkData:
     content: str
     chunk_index: int
     total_sections: int
+    parent_content: str | None = None
 
 
 def _num_tokens(text: str) -> int:
     return len(_ENCODING.encode(text))
+
+
+def _group_sentences(
+    sentences: list[str],
+    max_tokens: int,
+    overlap_tokens: int,
+    base_tokens: int,
+) -> list[list[str]]:
+    groups: list[list[str]] = []
+    overlap: list[str] = []
+    idx = 0
+
+    while idx < len(sentences):
+        current: list[str] = list(overlap)
+        tokens = base_tokens + sum(_num_tokens(s) for s in current)
+        added_any = False
+
+        while idx < len(sentences):
+            s_text = sentences[idx]
+            s_tokens = _num_tokens(s_text)
+            if tokens + s_tokens > max_tokens:
+                if not current:
+                    current.append(s_text[:1500])
+                    idx += 1
+                    added_any = True
+                break
+            current.append(s_text)
+            tokens += s_tokens
+            idx += 1
+            added_any = True
+
+        if not added_any and idx < len(sentences):
+            current.append(sentences[idx][:1000])
+            idx += 1
+
+        groups.append(current)
+
+        overlap = []
+        used = 0
+        for s in reversed(current):
+            s_t = _num_tokens(s)
+            if used + s_t > overlap_tokens:
+                break
+            overlap.insert(0, s)
+            used += s_t
+
+    return groups
 
 
 def _chunk_section_content(
@@ -34,7 +84,6 @@ def _chunk_section_content(
     total_sections: int,
     chunk_start_index: int,
 ) -> list[ChunkData]:
-    """Split section into chunks with overlap. Empty content still produces one chunk with heading only."""
     heading_tokens = _num_tokens(heading)
 
     # Single chunk if under limit
@@ -64,61 +113,50 @@ def _chunk_section_content(
             )
         ]
 
-    chunks: list[ChunkData] = []
-    overlap_sentences: list[str] = []
-    sent_idx = 0
+    groups = _group_sentences(sentences, _MAX_TOKENS, _OVERLAP_TOKENS, heading_tokens)
 
-    while sent_idx < len(sentences):
-        chunk_sentences: list[str] = list(overlap_sentences)
-        tokens = heading_tokens + sum(_num_tokens(s) for s in chunk_sentences)
-
-        added_any = False
-        while sent_idx < len(sentences):
-            s_text = sentences[sent_idx]
-            s_tokens = _num_tokens(s_text)
-
-            if tokens + s_tokens > _MAX_TOKENS:
-                if not chunk_sentences:
-                    # Single sentence exceeds token budget; force slice it so sent_idx advances
-                    sliced_text = s_text[:1500]
-                    chunk_sentences.append(sliced_text)
-                    sent_idx += 1
-                    added_any = True
-                break
-
-            chunk_sentences.append(s_text)
-            tokens += s_tokens
-            sent_idx += 1
-            added_any = True
-
-        if not added_any and sent_idx < len(sentences):
-            chunk_sentences.append(sentences[sent_idx][:1000])
-            sent_idx += 1
-
-        chunk_text = f"{heading}\n{' '.join(chunk_sentences)}"
-
-        chunks.append(
-            ChunkData(
-                paper_id=paper_id,
-                section_heading=heading,
-                section_level=section_level,
-                content=chunk_text,
-                chunk_index=chunk_start_index + len(chunks),
-                total_sections=total_sections,
-            )
+    return [
+        ChunkData(
+            paper_id=paper_id,
+            section_heading=heading,
+            section_level=section_level,
+            content=f"{heading}\n{' '.join(group)}",
+            chunk_index=chunk_start_index + i,
+            total_sections=total_sections,
         )
+        for i, group in enumerate(groups)
+    ]
 
-        # Compute overlap from tail of this chunk's sentences
-        overlap_sentences = []
-        overlap_tokens = 0
-        for s in reversed(chunk_sentences):
-            s_t = _num_tokens(s)
-            if overlap_tokens + s_t > _OVERLAP_TOKENS:
-                break
-            overlap_sentences.insert(0, s)
-            overlap_tokens += s_t
 
-    return chunks
+def _small_subchunks(medium: ChunkData) -> list[ChunkData]:
+    if _num_tokens(medium.content) <= _SMALL_MAX_TOKENS:
+        medium.parent_content = medium.content
+        return [medium]
+
+    parts = medium.content.split("\n", 1)
+    heading = parts[0]
+    body = parts[1] if len(parts) > 1 else ""
+    sentences = _SENTENCE_SPLIT.split(body) if body else []
+    if not sentences:
+        medium.parent_content = medium.content
+        return [medium]
+
+    groups = _group_sentences(
+        sentences, _SMALL_MAX_TOKENS, _SMALL_OVERLAP_TOKENS, _num_tokens(heading)
+    )
+
+    return [
+        ChunkData(
+            paper_id=medium.paper_id,
+            section_heading=medium.section_heading,
+            section_level=medium.section_level,
+            content=f"{heading}\n{' '.join(group)}",
+            chunk_index=medium.chunk_index,
+            total_sections=medium.total_sections,
+            parent_content=medium.content,
+        )
+        for group in groups
+    ]
 
 
 def chunk_sections(sections: list[SectionSchema], paper_id: str) -> list[ChunkData]:
@@ -126,7 +164,7 @@ def chunk_sections(sections: list[SectionSchema], paper_id: str) -> list[ChunkDa
     all_chunks: list[ChunkData] = []
 
     for section in sections:
-        section_chunks = _chunk_section_content(
+        medium_chunks = _chunk_section_content(
             content=section.content,
             heading=section.heading,
             section_level=section.level,
@@ -134,6 +172,10 @@ def chunk_sections(sections: list[SectionSchema], paper_id: str) -> list[ChunkDa
             total_sections=total,
             chunk_start_index=len(all_chunks),
         )
-        all_chunks.extend(section_chunks)
+        for medium in medium_chunks:
+            all_chunks.extend(_small_subchunks(medium))
+
+    for i, chunk in enumerate(all_chunks):
+        chunk.chunk_index = i
 
     return all_chunks

@@ -35,7 +35,7 @@ _STOPWORDS = {
 
 _VECTOR_SELECT = """
     SELECT c.id, c.paper_id, c.metadata ->> 'section_heading' AS section_heading,
-           c.content, c.metadata, 1 - (c.embedding <=> CAST(:query_vec AS vector)) AS score
+           c.content, c.parent_content, c.metadata, 1 - (c.embedding <=> CAST(:query_vec AS vector)) AS score
     FROM chunks c
     JOIN papers p ON p.id = c.paper_id
     WHERE p.status = 'ready'
@@ -47,7 +47,7 @@ _VECTOR_SELECT = """
 
 _LEXICAL_SELECT = """
     SELECT c.id, c.paper_id, c.metadata ->> 'section_heading' AS section_heading,
-           c.content, c.metadata,
+           c.content, c.parent_content, c.metadata,
            ts_rank_cd(to_tsvector('english', c.content), to_tsquery('english', :tsq), 32) AS score
     FROM chunks c
     JOIN papers p ON p.id = c.paper_id
@@ -85,17 +85,22 @@ def _build_tsquery(query: str) -> str | None:
 
 
 def _rows_to_results(rows) -> list[ChunkResult]:
-    return [
-        ChunkResult(
-            chunk_id=str(row[0]),
-            paper_id=str(row[1]),
-            section_heading=row[2] or "",
-            content=row[3],
-            score=float(row[5]) if row[5] is not None else 0.0,
-            metadata=dict(row[4]) if row[4] else {},
+    results: list[ChunkResult] = []
+    for row in rows:
+        metadata = dict(row[5]) if row[5] else {}
+        if row[4]:
+            metadata["parent_content"] = row[4]
+        results.append(
+            ChunkResult(
+                chunk_id=str(row[0]),
+                paper_id=str(row[1]),
+                section_heading=row[2] or "",
+                content=row[3],
+                score=float(row[6]) if row[6] is not None else 0.0,
+                metadata=metadata,
+            )
         )
-        for row in rows
-    ]
+    return results
 
 
 def _rrf_fuse(

@@ -3,8 +3,8 @@ import re
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 
 from app.config import settings
 from app.services.retriever import ChunkResult
@@ -54,7 +54,8 @@ def _build_context(chunks: list[ChunkResult]) -> str:
     lines = []
     for i, c in enumerate(chunks, start=1):
         heading = c.section_heading or "Untitled"
-        lines.append(f"[{i}] (Section: {heading}) {c.content}")
+        text = c.metadata.get("parent_content") or c.content
+        lines.append(f"[{i}] (Section: {heading}) {text}")
     return "\n\n".join(lines)
 
 

@@ -50,6 +50,7 @@ class Chunk(Base):
         UUID(as_uuid=True), ForeignKey("paper_sections.id", ondelete="SET NULL"), nullable=True
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    parent_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     embedding: Mapped[list[float]] = mapped_column(VECTOR(768), nullable=False)
     meta_data: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)
 

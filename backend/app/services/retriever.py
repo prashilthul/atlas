@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import _get_session_factory
 from app.services.embedder import _EMBED_MODEL, EMBEDDING_DIM, embed_query
 from app.services.tracing import Tracer
@@ -136,10 +137,15 @@ async def retrieve(
     query: str,
     paper_ids: list[str] | None = None,
     top_k: int = 10,
-    score_threshold: float = 0.0,
+    score_threshold: float | None = None,
     db: AsyncSession | None = None,
     tracer: Tracer | None = None,
 ) -> list[ChunkResult]:
+    threshold = (
+        settings.RAG_VECTOR_THRESHOLD
+        if score_threshold is None
+        else score_threshold
+    )
     query_vec: list[float] = []
     embed_error: str | None = None
     try:
@@ -177,7 +183,7 @@ async def retrieve(
             if tracer:
                 async with tracer.span(
                     "vector_search",
-                    attributes={"top_k": top_k, "filter_paper_ids": bool(paper_ids)},
+                    attributes={"top_k": top_k, "filter_paper_ids": bool(paper_ids), "threshold": threshold},
                 ) as span:
                     rows = (await db.execute(vec_stmt, vec_params)).fetchall()
                     vec_results = _rows_to_results(rows)

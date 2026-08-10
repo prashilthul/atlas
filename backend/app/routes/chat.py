@@ -29,6 +29,7 @@ class ChatRequest(BaseModel):
     session_id: str | None = None
     stream: bool = False
     evaluate: bool | None = None
+    score_threshold: float | None = None
 
 
 class ChatResponse(BaseModel):
@@ -80,7 +81,14 @@ async def chat(
                 retrieval_query = await rewrite_query(req.query, history)
                 span.attributes["rewritten"] = retrieval_query
 
-    chunks = await retrieve(query=retrieval_query, paper_ids=req.paper_ids, top_k=20, db=db, tracer=tracer)
+    chunks = await retrieve(
+        query=retrieval_query,
+        paper_ids=req.paper_ids,
+        top_k=20,
+        db=db,
+        tracer=tracer,
+        score_threshold=req.score_threshold,
+    )
     chunks = await rerank(query=req.query, chunks=chunks, top_k=5, tracer=tracer)
 
     if req.stream:

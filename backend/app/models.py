@@ -51,7 +51,7 @@ class Chunk(Base):
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     parent_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    embedding: Mapped[list[float]] = mapped_column(VECTOR(768), nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(VECTOR(2048), nullable=False)
     meta_data: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)
 
 

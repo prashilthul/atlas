@@ -19,7 +19,7 @@ const FEATURES = [
   {
     icon: Upload,
     title: "Upload & Index",
-    desc: "Drop a PDF. Structure-aware parsing splits it into sections and chunks, then embeds each chunk into a 768-dim vector space for semantic retrieval.",
+    desc: "Drop a PDF. Structure-aware parsing splits it into sections and chunks, then embeds each chunk into a 2048-dim vector space for semantic retrieval.",
   },
   {
     icon: Search,

@@ -44,8 +44,8 @@ def main() -> None:
         embeddings = embed_chunks(chunks)
         dims = [len(v) for v in embeddings]
         print(f"  Vectors: {len(embeddings)} x {dims[0]}d")
-        if dims and dims[0] != 768:
-            print(f"  WARN: expected 768-dim, got {dims[0]}")
+        if dims and dims[0] != 2048:
+            print(f"  WARN: expected 2048-dim, got {dims[0]}")
     except Exception as exc:
         print(f"  SKIP: {exc}")
 

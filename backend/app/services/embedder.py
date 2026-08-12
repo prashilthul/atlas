@@ -9,8 +9,8 @@ from app.services.chunker import ChunkData
 logger = logging.getLogger(__name__)
 
 _BASE = settings.OPENROUTER_BASE_URL or "https://openrouter.ai/api/v1"
-_EMBED_MODEL = "nvidia/nemotron-3-embed-1b:free"
-EMBEDDING_DIM = 768
+_EMBED_MODEL = settings.EMBED_MODEL
+EMBEDDING_DIM = settings.EMBED_DIM
 _BATCH_SIZE = 16
 _MAX_RETRIES = 3
 
@@ -59,15 +59,17 @@ def _embed_with_retry(texts: list[str]) -> list[list[float]]:
     )
 
 
-def embed_chunks(chunks: list[ChunkData]) -> list[list[float]]:
-    texts = [c.content for c in chunks]
+def embed_texts(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
-
     embeddings: list[list[float]] = []
     for i in range(0, len(texts), _BATCH_SIZE):
         embeddings.extend(_embed_with_retry(texts[i : i + _BATCH_SIZE]))
     return embeddings
+
+
+def embed_chunks(chunks: list[ChunkData]) -> list[list[float]]:
+    return embed_texts([c.content for c in chunks])
 
 
 def embed_query(query: str) -> list[float]:

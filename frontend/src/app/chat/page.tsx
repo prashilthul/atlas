@@ -291,7 +291,7 @@ function renderAssistantContent(content: string, citations?: CitationData[]) {
 // --- Pipeline Stage Loading Animation Component ---
 
 const PIPELINE_STAGES = [
-  { label: "Embedding Query", detail: "Converting question into 768d vector space...", icon: Search },
+  { label: "Embedding Query", detail: "Converting question into 2048d vector space...", icon: Search },
   { label: "Vector Search", detail: "Searching candidate chunks across uploaded papers...", icon: BookOpen },
   { label: "Reranking Context", detail: "Scoring & filtering chunks for maximum precision...", icon: Zap },
   { label: "Generating Answer", detail: "Synthesizing grounded response with citations...", icon: Sparkles },

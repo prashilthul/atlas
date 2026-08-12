@@ -17,7 +17,7 @@ from app.schemas import (
     SectionInfo,
 )
 from app.services.chunker import ChunkData, chunk_sections
-from app.services.embedder import embed_chunks
+from app.services.embedder import EMBEDDING_DIM, embed_chunks
 from app.services.parser import parse_pdf
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,7 @@ async def upload_paper(
 
     chunk_data_list = chunk_sections(paper_schema.sections, str(paper.id))
 
-    placeholder = [0.0] * 768
+    placeholder = [0.0] * EMBEDDING_DIM
     for cd in chunk_data_list:
         chunk = Chunk(
             paper_id=paper.id,

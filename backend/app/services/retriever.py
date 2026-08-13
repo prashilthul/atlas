@@ -172,7 +172,7 @@ async def retrieve(
         if query_vec:
             vec_params: dict = {
                 "query_vec": str(query_vec),
-                "threshold": score_threshold,
+                "threshold": threshold,
                 "top_k": top_k,
             }
             if paper_ids:

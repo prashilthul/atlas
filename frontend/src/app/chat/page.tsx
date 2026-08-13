@@ -535,7 +535,11 @@ export default function ChatPage() {
     if (selectedPaperId && selectedPaperId !== "all") {
       fetchPaper(selectedPaperId)
         .then(setSelectedPaperDetail)
-        .catch(() => setSelectedPaperDetail(null));
+        .catch(() => {
+          setSelectedPaperDetail(null);
+          setSelectedPaperId("all");
+          router.replace("/chat");
+        });
     } else {
       setSelectedPaperDetail(null);
     }
@@ -589,7 +593,10 @@ export default function ChatPage() {
       setSending(true);
       setError(null);
 
-      const paperIdsFilter = selectedPaperId && selectedPaperId !== "all" ? [selectedPaperId] : undefined;
+      const paperIdsFilter =
+      selectedPaperId && selectedPaperId !== "all" && availablePapers.some((p) => p.id === selectedPaperId)
+        ? [selectedPaperId]
+        : undefined;
 
       const userMsg: Message = {
         id: `user-${Date.now()}`,
@@ -702,7 +709,7 @@ export default function ChatPage() {
         inputRef.current?.focus();
       }
     },
-    [sending, selectedPaperId, sessionId, evaluationEnabled]
+    [sending, selectedPaperId, sessionId, evaluationEnabled, availablePapers]
   );
 
   const handleSubmit = (e: React.FormEvent) => {

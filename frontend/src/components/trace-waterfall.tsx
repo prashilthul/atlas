@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight, ArrowUpRight, ArrowDownRight, Layers, Sparkles, Search, BookOpen, Zap } from "lucide-react";
+import { ChevronDown, ChevronRight, ArrowUpRight, ArrowDownRight, Layers, Sparkles, Search, BookOpen, Zap, PenLine, FileSearch } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 export interface TraceSpan {
@@ -21,7 +21,9 @@ interface TraceWaterfallProps {
 
 const STEP_COLORS: Record<string, { bg: string; bar: string; badge: string }> = {
   embed: { bg: "bg-indigo-50", bar: "bg-indigo-600", badge: "bg-indigo-100 text-indigo-800" },
+  query_rewrite: { bg: "bg-cyan-50", bar: "bg-cyan-600", badge: "bg-cyan-100 text-cyan-800" },
   vector_search: { bg: "bg-sky-50", bar: "bg-sky-600", badge: "bg-sky-100 text-sky-800" },
+  lexical_search: { bg: "bg-teal-50", bar: "bg-teal-600", badge: "bg-teal-100 text-teal-800" },
   rerank: { bg: "bg-amber-50", bar: "bg-amber-600", badge: "bg-amber-100 text-amber-800" },
   generate: { bg: "bg-emerald-50", bar: "bg-emerald-600", badge: "bg-emerald-100 text-emerald-800" },
   judge: { bg: "bg-purple-50", bar: "bg-purple-600", badge: "bg-purple-100 text-purple-800" },
@@ -29,7 +31,9 @@ const STEP_COLORS: Record<string, { bg: string; bar: string; badge: string }> = 
 
 const STEP_ICONS: Record<string, any> = {
   embed: Search,
+  query_rewrite: PenLine,
   vector_search: BookOpen,
+  lexical_search: FileSearch,
   rerank: Zap,
   generate: Sparkles,
   judge: Layers,
@@ -246,6 +250,51 @@ export function TraceWaterfall({ spans, totalDurationMs }: TraceWaterfallProps) 
                             </span>
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Query Rewrite Diagnostics */}
+                  {span.name === "query_rewrite" && span.attributes?.original && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-cyan-700 uppercase tracking-wider">
+                          Query Rewrite Diagnostics
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 gap-1.5">
+                        <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                            Original Query
+                          </span>
+                          <p className="text-slate-700">{span.attributes?.original}</p>
+                        </div>
+                        <div className="p-2.5 rounded-lg bg-cyan-50 border border-cyan-200 text-xs">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-600 block mb-1">
+                            Rewritten (Retrieval) Query
+                          </span>
+                          <p className="text-slate-800">{span.attributes?.rewritten}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Lexical Search Diagnostics */}
+                  {span.name === "lexical_search" && span.attributes?.tsquery && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-teal-700 uppercase tracking-wider">
+                          Full-Text Lexical Search Diagnostics
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          {span.attributes?.results_count || 0} matches
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded-lg bg-teal-50 border border-teal-200 text-xs">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-teal-600 block mb-1">
+                          tsquery
+                        </span>
+                        <p className="text-slate-800 font-mono">{span.attributes?.tsquery}</p>
                       </div>
                     </div>
                   )}

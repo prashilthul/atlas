@@ -62,13 +62,17 @@ interface TimeseriesPoint {
   span_counts: {
     total: number;
     embed: number;
+    rewrite: number;
     search: number;
+    lexical: number;
     rerank: number;
     generate: number;
   };
   avg_latency_ms: {
     embed: number;
+    rewrite: number;
     search: number;
+    lexical: number;
     rerank: number;
     generate: number;
   };
@@ -410,13 +414,18 @@ function LatencyBreakdown({
   loading: boolean;
 }) {
   const chartData = useMemo(() => {
-    const order = ["embed", "vector_search", "rerank", "generate"];
+    const order = ["embed", "query_rewrite", "vector_search", "lexical_search", "rerank", "generate"];
     const items = data.filter((d) => order.includes(d.step));
     const sorted = items.sort(
       (a, b) => order.indexOf(a.step) - order.indexOf(b.step)
     );
+    const stepLabel = (step: string) =>
+      step === "vector_search" ? "search"
+      : step === "query_rewrite" ? "rewrite"
+      : step === "lexical_search" ? "lexical"
+      : step;
     return sorted.map((d) => ({
-      step: d.step === "vector_search" ? "search" : d.step,
+      step: stepLabel(d.step),
       p50: d.p50_ms,
       p95: d.p95_ms,
     }));
@@ -672,7 +681,9 @@ function PipelineActivity({
       data.map((p) => ({
         date: p.date.slice(0, 10),
         Embeddings: p.span_counts.embed,
+        Rewrite: p.span_counts.rewrite,
         Search: p.span_counts.search,
+        Lexical: p.span_counts.lexical,
         Rerank: p.span_counts.rerank,
         Generate: p.span_counts.generate,
       })),
@@ -711,10 +722,24 @@ function PipelineActivity({
             />
             <Area
               type="monotone"
+              dataKey="Rewrite"
+              stackId="1"
+              stroke="#a3a3a3"
+              fill="#e5e5e5"
+            />
+            <Area
+              type="monotone"
               dataKey="Search"
               stackId="1"
               stroke="#404040"
               fill="#a3a3a3"
+            />
+            <Area
+              type="monotone"
+              dataKey="Lexical"
+              stackId="1"
+              stroke="#595959"
+              fill="#d4d4d4"
             />
             <Area
               type="monotone"

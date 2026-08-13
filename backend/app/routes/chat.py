@@ -149,7 +149,7 @@ async def _stream_and_store(
     evaluate: bool,
 ):
     db.add(ChatMessage(session_id=session_id, role="user", content=query))
-    await db.flush()
+    await db.commit()
 
     full_text = ""
     final_citations = None

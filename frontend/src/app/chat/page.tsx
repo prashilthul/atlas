@@ -408,6 +408,36 @@ export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
 
+  const CHAT_STORAGE_KEY = "paperpilot.active_chat";
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (saved.sessionId) setSessionId(saved.sessionId);
+      if (Array.isArray(saved.messages)) {
+        setMessages(
+          saved.messages.map((m: Message) => ({ ...m, streaming: false }))
+        );
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!sessionId && messages.length === 0) return;
+    try {
+      localStorage.setItem(
+        CHAT_STORAGE_KEY,
+        JSON.stringify({ sessionId, messages })
+      );
+    } catch {
+      // ignore
+    }
+  }, [sessionId, messages]);
+
   const fetchSessions = useCallback(async () => {
     try {
       const base = API_BASE || (typeof window !== "undefined" ? window.location.origin : "");
@@ -451,6 +481,11 @@ export default function ChatPage() {
     setMessages([]);
     setInput("");
     setError(null);
+    try {
+      localStorage.removeItem(CHAT_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
   };
 
   const confirmDeleteSession = async () => {

@@ -32,10 +32,14 @@ def _embed_batch(texts: list[str]) -> list[list[float]]:
     response.raise_for_status()
     data = response.json()
 
-    if "data" not in data or not isinstance(data["data"], list):
-        raise RuntimeError(f"Unexpected embedding response from OpenRouter: {data}")
+    results = []
+    for item in data["data"]:
+        emb = item.get("embedding", [])
+        if len(emb) != EMBEDDING_DIM:
+            logger.warning("Embedding dimension mismatch: expected %d, got %d", EMBEDDING_DIM, len(emb))
+        results.append(emb[:EMBEDDING_DIM])
 
-    return [item["embedding"][:EMBEDDING_DIM] for item in data["data"]]
+    return results
 
 
 def _embed_with_retry(texts: list[str]) -> list[list[float]]:

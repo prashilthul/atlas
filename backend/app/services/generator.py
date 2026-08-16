@@ -30,7 +30,7 @@ _GENERAL_SYSTEM_PROMPT = (
     "If they ask a specific question without uploading a paper, answer politely and suggest uploading a PDF paper for section citations."
 )
 
-_MARKER_PATTERN = re.compile(r"[\[【](\d+)[\]】]")
+_MARKER_PATTERN = re.compile(r"[\[【]([\d\s,–-]+)[\]】]")
 
 
 @dataclass
@@ -59,28 +59,38 @@ def _build_context(chunks: list[ChunkResult]) -> str:
     return "\n\n".join(lines)
 
 
+def _parse_marker_numbers(content: str) -> list[int]:
+    range_match = re.search(r"^(\d+)\s*[-–]\s*(\d+)$", content.strip())
+    if range_match:
+        start, end = int(range_match.group(1)), int(range_match.group(2))
+        if start <= end and (end - start) < 20:
+            return list(range(start, end + 1))
+    return [int(p) for p in re.findall(r"\d+", content)]
+
+
 def _extract_citations(
     answer: str, chunks: list[ChunkResult]
 ) -> list[Citation]:
     seen = set()
     citations = []
     for match in _MARKER_PATTERN.finditer(answer):
-        n = int(match.group(1))
-        if n < 1 or n > len(chunks):
-            continue
-        chunk = chunks[n - 1]
-        key = (chunk.chunk_id, n)
-        if key in seen:
-            continue
-        seen.add(key)
-        citations.append(
-            Citation(
-                chunk_id=chunk.chunk_id,
-                paper_id=chunk.paper_id,
-                section_heading=chunk.section_heading,
-                marker=f"[{n}]",
+        numbers = _parse_marker_numbers(match.group(1))
+        for n in numbers:
+            if n < 1 or n > len(chunks):
+                continue
+            chunk = chunks[n - 1]
+            key = (chunk.chunk_id, n)
+            if key in seen:
+                continue
+            seen.add(key)
+            citations.append(
+                Citation(
+                    chunk_id=chunk.chunk_id,
+                    paper_id=chunk.paper_id,
+                    section_heading=chunk.section_heading,
+                    marker=f"[{n}]",
+                )
             )
-        )
     return citations
 
 

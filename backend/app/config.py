@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     ENABLE_ONLINE_EVAL: bool = True
     RAG_VECTOR_THRESHOLD: float = 0.30
     EMBED_MODEL: str = "nvidia/nemotron-3-embed-1b:free"
-    EMBED_DIM: int = 2048
+    EMBED_DIM: int = 1024
 
     model_config = {"env_file": ".env"}
 

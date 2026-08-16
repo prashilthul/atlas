@@ -49,10 +49,13 @@ async def _judge(prompt: str) -> float | None:
     try:
         response = await llm.ainvoke([HumanMessage(content=prompt)])
         text = (response.content or "").strip()
-        # Parse float using regex (handles reasoning tags like <think>0.95</think>)
-        match = re.search(r"\b(1(?:\.0+)?|0(?:\.\d+)?)\b", text)
-        if match:
-            val = float(match.group(1))
+        # Strip reasoning/thinking tags if present
+        text_clean = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+        if not text_clean:
+            text_clean = text
+        matches = re.findall(r"\b(1(?:\.0+)?|0(?:\.\d+)?)\b", text_clean)
+        if matches:
+            val = float(matches[-1])
             return max(0.0, min(1.0, val))
         return None
     except Exception as e:

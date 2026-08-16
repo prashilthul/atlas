@@ -64,7 +64,7 @@ The retrieval-augmented generation pipeline runs in ten distinct steps.
 
 **Chunk.** The chunker takes the parsed sections and produces one chunk per section heading. This guarantees that no chunk straddles a section boundary, preserving topical coherence. If a section exceeds 512 tokens (measured by `cl100k_base` encoding), it splits at sentence boundaries with a 64-token overlap sliding window. Each chunk carries metadata: `paper_id`, `section_heading`, `section_level`, `chunk_index`, and `total_sections`.
 
-**Embed.** Chunks are sent in a batch to OpenRouter using `nvidia/nemotron-3-embed-1b:free`, which returns 768-dimensional vectors. If OpenRouter is unreachable, the system falls back to `sentence-transformers/all-mpnet-base-v2` running locally, which also produces 768-dim vectors. The query is embedded using the same model for consistent vector space alignment.
+**Embed.** Chunks are sent in a batch to OpenRouter using `nvidia/nemotron-3-embed-1b:free`. The query is embedded using the same model for consistent vector space alignment.
 
 **Store.** The paper record, its sections, and the chunk vectors are written to PostgreSQL. Embeddings go into the `chunks` table with a `vector(768)` column indexed by IVFFLAT with 10 lists using cosine distance. During ingestion, placeholder embeddings are created synchronously, and the real embeddings are filled by a background task to keep the upload response fast.
 
@@ -138,13 +138,8 @@ Aggregation uses PostgreSQL functions: `percentile_cont` for latency percentiles
 
 ## Embeddings Strategy
 
-The embedding pipeline uses two tiers.
+The embedding pipeline sends text batches directly to OpenRouter using `nvidia/nemotron-3-embed-1b:free`. Embeddings are stored and searched using pgvector in PostgreSQL.
 
-**Primary**: `nvidia/nemotron-3-embed-1b:free` served through OpenRouter. This is a 1-billion-parameter embedding model with 768-dimensional output. It runs on Nvidia's infrastructure and is available on OpenRouter's free tier with rate limits.
-
-**Fallback**: `sentence-transformers/all-mpnet-base-v2` runs locally via HuggingFace's sentence-transformers library. It also produces 768-dimensional vectors, ensuring seamless fallback without dimension mismatch. The model is downloaded on first use and cached to disk.
-
-The embedding dimension of 768 was chosen because both primary and fallback models share it. This eliminates the need for a dimension adapter layer and keeps the pgvector schema stable regardless of which model is active.
 
 The pgvector index uses IVFFLAT with 10 lists. IVFFLAT divides the vector space into 10 clusters and searches only the nearest clusters during query time. The `vector_cosine_ops` operator class provides cosine similarity search. The low number of lists (10) is appropriate for the expected dataset size (hundreds to low thousands of papers, each with tens of chunks). For larger datasets, the index should be rebuilt with more lists.
 

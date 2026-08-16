@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_db
+from app.database import _get_session_factory, get_db
 from app.models import ChatMessage, ChatSession
 from app.services.generator import generate, stream_generate
 from app.services.online_eval import run_online_eval
@@ -93,7 +93,7 @@ async def chat(
 
     if req.stream:
         return StreamingResponse(
-            _stream_and_store(req.query, chunks, session_id, db, tracer, evaluate),
+            _stream_and_store(req.query, chunks, session_id, tracer, evaluate),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -144,12 +144,13 @@ async def _stream_and_store(
     query: str,
     chunks: list,
     session_id: UUID,
-    db: AsyncSession,
     tracer: Tracer,
     evaluate: bool,
 ):
-    db.add(ChatMessage(session_id=session_id, role="user", content=query))
-    await db.commit()
+    factory = _get_session_factory()
+    async with factory() as db:
+        db.add(ChatMessage(session_id=session_id, role="user", content=query))
+        await db.commit()
 
     full_text = ""
     final_citations = None
@@ -184,18 +185,19 @@ async def _stream_and_store(
             if evaluate
             else None
         )
-        db.add(
-            ChatMessage(
-                session_id=session_id,
-                role="assistant",
-                content=content_to_save,
-                citations=final_citations,
-                eval_scores=scores,
-                trace_id=tracer.trace_id,
+        async with factory() as db:
+            db.add(
+                ChatMessage(
+                    session_id=session_id,
+                    role="assistant",
+                    content=content_to_save,
+                    citations=final_citations,
+                    eval_scores=scores,
+                    trace_id=tracer.trace_id,
+                )
             )
-        )
-        await tracer.store(db)
-        await db.commit()
+            await tracer.store(db)
+            await db.commit()
 
 
 @router.get("/chat/sessions")
@@ -247,6 +249,7 @@ async def get_session(
                 "role": m.role,
                 "content": m.content,
                 "citations": m.citations,
+                "trace_id": m.trace_id,
                 "created_at": m.created_at.isoformat(),
             }
             for m in msgs

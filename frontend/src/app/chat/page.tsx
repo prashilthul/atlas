@@ -468,6 +468,7 @@ export default function ChatPage() {
             role: m.role,
             content: m.content,
             citations: m.citations,
+            trace_id: m.trace_id,
           }))
         );
       }

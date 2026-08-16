@@ -1,4 +1,5 @@
 import logging
+import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -16,14 +17,14 @@ _SYSTEM_PROMPT = (
     "Output only the rewritten question and nothing else."
 )
 
-_ANAPHORA = (
-    " it ", " this ", " that ", " they ", " them ", " these ", " those ",
-    " what about ", " the one ", " above ", " previous ", " earlier ",
+_ANAPHORA_RE = re.compile(
+    r"\b(it|this|that|they|them|these|those|what about|the one|above|previous|earlier)\b",
+    re.IGNORECASE,
 )
 
-_FOLLOWUP_MARKERS = (
-    "paragraph", "section", "passage", "whole", " it ", " that ", " this ",
-    " above ", " previous ", " earlier ", " the one ",
+_FOLLOWUP_RE = re.compile(
+    r"\b(paragraph|section|passage|whole|it|that|this|above|previous|earlier|the one)\b",
+    re.IGNORECASE,
 )
 
 
@@ -42,8 +43,7 @@ def _previous_user_query(query: str, history: list[tuple[str, str]]) -> str | No
 
 
 def _looks_like_followup(query: str) -> bool:
-    q = f" {query.lower().strip()} "
-    return any(m in q for m in _FOLLOWUP_MARKERS)
+    return bool(_FOLLOWUP_RE.search(query))
 
 
 def should_rewrite(query: str, history: list[tuple[str, str]]) -> bool:
@@ -51,8 +51,7 @@ def should_rewrite(query: str, history: list[tuple[str, str]]) -> bool:
         return False
     if len(query) <= 100:
         return True
-    padded = f" {query.lower().strip()} "
-    return any(tok in padded for tok in _ANAPHORA)
+    return bool(_ANAPHORA_RE.search(query))
 
 
 async def rewrite_query(

@@ -30,7 +30,13 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function UploadDialog() {
+interface UploadDialogProps {
+  trigger?: React.ReactElement;
+  buttonText?: string;
+  className?: string;
+}
+
+export function UploadDialog({ trigger, buttonText = "Upload Paper", className }: UploadDialogProps = {}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -336,9 +342,15 @@ export function UploadDialog() {
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
-          <Button variant="outline" size="icon" aria-label="Upload paper">
-            <Upload className="size-4" />
-          </Button>
+          trigger || (
+            <Button
+              size="sm"
+              className={`bg-slate-900 text-white hover:bg-slate-800 gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer ${className || ""}`}
+            >
+              <Upload className="size-3.5" />
+              <span>{buttonText}</span>
+            </Button>
+          )
         }
       />
       <DialogContent className="sm:max-w-md w-full overflow-hidden">

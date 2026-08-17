@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Clock, CheckCircle2, AlertTriangle, Zap } from "lucide-react";
 import {
   LineChart,
   Line,
@@ -10,11 +11,6 @@ import {
   Bar,
   AreaChart,
   Area,
-  RadarChart,
-  Radar,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -43,7 +39,6 @@ interface PerPaperRow {
 }
 
 interface MetricsSummary {
-  health_score: number;
   components: {
     latency: { score: number; weight: number };
     empty_result_rate: { score: number; weight: number };
@@ -109,69 +104,7 @@ function formatTime(dateStr: string): string {
   });
 }
 
-function healthColor(score: number): string {
-  if (score < 60) return "#dc2626";
-  if (score < 80) return "#d97706";
-  return "#16a34a";
-}
-
-// --- SVG Gauge ---
-
-function HealthGauge({ score }: { score: number }) {
-  const r = 72;
-  const cx = 100;
-  const cy = 100;
-  const circumference = 2 * Math.PI * r;
-  const offset = circumference * (1 - score / 100);
-  const color = healthColor(score);
-
-  return (
-    <div className="flex flex-col items-center gap-2">
-      <svg width="200" height="200" viewBox="0 0 200 200" className="-rotate-90">
-        {/* Background track */}
-        <circle
-          cx={cx}
-          cy={cy}
-          r={r}
-          fill="none"
-          stroke="#e5e5e5"
-          strokeWidth="12"
-        />
-        {/* Foreground arc */}
-        <circle
-          cx={cx}
-          cy={cy}
-          r={r}
-          fill="none"
-          stroke={color}
-          strokeWidth="12"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          strokeLinecap="round"
-          className="transition-all duration-700 ease-out"
-        />
-        {/* Center text */}
-        <text
-          x={cx}
-          y={cy}
-          textAnchor="middle"
-          dominantBaseline="central"
-          className="rotate-90"
-          fontSize="36"
-          fontWeight="700"
-          fill={color}
-        >
-          {score}
-        </text>
-      </svg>
-      <span className="text-sm font-medium text-muted-foreground">
-        Health Score
-      </span>
-    </div>
-  );
-}
-
-// --- Custom tooltip (text only, no emoji) ---
+// --- Custom tooltip ---
 
 function ChartTooltip({
   active,
@@ -189,7 +122,7 @@ function ChartTooltip({
     <div className="rounded-lg border border-border bg-card px-3 py-2 text-sm shadow-sm">
       <p className="mb-1 font-medium text-foreground">{label}</p>
       {payload.map((entry, i) => (
-        <p key={i} className="text-muted-foreground">
+        <p key={i} className="text-muted-foreground text-xs">
           <span
             className="inline-block mr-1.5 size-2 rounded-full"
             style={{ backgroundColor: entry.color }}
@@ -250,6 +183,129 @@ function ErrorBanner({
   );
 }
 
+// --- KPI Summary Stat Cards Grid ---
+
+function SummaryStatsGrid({
+  summary,
+  timeseries7d,
+  loading,
+}: {
+  summary: MetricsSummary | null;
+  timeseries7d: TimeseriesResponse | null;
+  loading: boolean;
+}) {
+  const avgCitationAccuracy = summary?.details?.avg_citation_accuracy ?? 0;
+  const emptyRate24h = summary?.details?.empty_result_rate_24h ?? 0;
+
+  const p50Gen = summary?.details?.latency_percentiles?.find((l) => l.step === "generate")?.p50_ms ?? 0;
+  const p95Gen = summary?.details?.latency_percentiles?.find((l) => l.step === "generate")?.p95_ms ?? 0;
+
+  const totalOps = useMemo(() => {
+    if (!timeseries7d?.data) return 0;
+    return timeseries7d.data.reduce((acc, p) => acc + (p.span_counts?.total || 0), 0);
+  }, [timeseries7d]);
+
+  if (loading) {
+    return (
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {[1, 2, 3, 4].map((i) => (
+          <Card key={i}>
+            <CardContent className="p-5">
+              <div className="h-4 w-1/2 animate-pulse rounded bg-muted mb-3" />
+              <div className="h-8 w-3/4 animate-pulse rounded bg-muted" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Card 1: Generation Latency */}
+      <Card className="relative overflow-hidden border-slate-200 shadow-xs hover:border-slate-300 transition-all">
+        <CardContent className="p-5">
+          <div className="flex items-center justify-between text-slate-500 mb-2">
+            <span className="text-xs font-medium uppercase tracking-wider text-slate-500">Pipeline Latency</span>
+            <div className="p-2 rounded-lg bg-slate-100 text-slate-700">
+              <Clock className="size-4" />
+            </div>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-bold tracking-tight text-slate-900 font-mono">
+              {p50Gen >= 1000 ? `${(p50Gen / 1000).toFixed(2)}s` : `${Math.round(p50Gen)}ms`}
+            </span>
+            <span className="text-xs text-slate-500 font-mono">p50</span>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            p95: <span className="font-mono text-slate-700 font-semibold">{p95Gen >= 1000 ? `${(p95Gen / 1000).toFixed(2)}s` : `${Math.round(p95Gen)}ms`}</span>
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Card 2: Citation Accuracy */}
+      <Card className="relative overflow-hidden border-slate-200 shadow-xs hover:border-slate-300 transition-all">
+        <CardContent className="p-5">
+          <div className="flex items-center justify-between text-slate-500 mb-2">
+            <span className="text-xs font-medium uppercase tracking-wider text-slate-500">Citation Accuracy</span>
+            <div className="p-2 rounded-lg bg-slate-100 text-slate-700">
+              <CheckCircle2 className="size-4" />
+            </div>
+          </div>
+          <div className="flex items-baseline gap-1">
+            <span className="text-2xl font-bold tracking-tight text-slate-900 font-mono">
+              {(avgCitationAccuracy * 100).toFixed(1)}%
+            </span>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            Grounded citation ratio across responses
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Card 3: 24h Empty Result Rate */}
+      <Card className="relative overflow-hidden border-slate-200 shadow-xs hover:border-slate-300 transition-all">
+        <CardContent className="p-5">
+          <div className="flex items-center justify-between text-slate-500 mb-2">
+            <span className="text-xs font-medium uppercase tracking-wider text-slate-500">24h Empty Result Rate</span>
+            <div className="p-2 rounded-lg bg-slate-100 text-slate-700">
+              <AlertTriangle className="size-4" />
+            </div>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className={`text-2xl font-bold tracking-tight font-mono ${emptyRate24h > 0.2 ? "text-amber-700" : "text-slate-900"}`}>
+              {(emptyRate24h * 100).toFixed(1)}%
+            </span>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            Queries yielding 0 retrieved chunks
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Card 4: 7d Operations */}
+      <Card className="relative overflow-hidden border-slate-200 shadow-xs hover:border-slate-300 transition-all">
+        <CardContent className="p-5">
+          <div className="flex items-center justify-between text-slate-500 mb-2">
+            <span className="text-xs font-medium uppercase tracking-wider text-slate-500">7-Day Activity</span>
+            <div className="p-2 rounded-lg bg-slate-100 text-slate-700">
+              <Zap className="size-4" />
+            </div>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-bold tracking-tight text-slate-900 font-mono">
+              {totalOps.toLocaleString()}
+            </span>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            Total pipeline operations recorded
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // --- Faithfulness Trend ---
 
 function computeQualityScore(point: TimeseriesPoint): number {
@@ -292,7 +348,7 @@ function FaithfulnessTrend({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Search quality</CardTitle>
+        <CardTitle>Search quality trend</CardTitle>
       </CardHeader>
       <CardContent>
         <ResponsiveContainer width="100%" height={260}>
@@ -499,12 +555,12 @@ function EmptyResultRate({
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle>Empty result rate</CardTitle>
+          <CardTitle>Empty result rate trend</CardTitle>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">24h</span>
+            <span className="text-xs text-muted-foreground">Latest 24h:</span>
             <span
-              className={`text-sm font-semibold ${
-                isAboveThreshold ? "text-red-600" : "text-green-600"
+              className={`text-xs font-mono font-semibold ${
+                isAboveThreshold ? "text-amber-700" : "text-slate-900"
               }`}
             >
               {(latestRate * 100).toFixed(1)}%
@@ -513,13 +569,13 @@ function EmptyResultRate({
         </div>
       </CardHeader>
       <CardContent>
-        <ResponsiveContainer width="100%" height={80}>
+        <ResponsiveContainer width="100%" height={160}>
           <AreaChart data={chartData}>
             <Area
               type="monotone"
               dataKey="rate"
-              stroke={isAboveThreshold ? "#dc2626" : "#16a34a"}
-              fill={isAboveThreshold ? "#fecaca" : "#bbf7d0"}
+              stroke="#404040"
+              fill="#e5e5e5"
               strokeWidth={2}
               dot={false}
             />
@@ -583,12 +639,12 @@ function LowScoringQueries({
                 >
                   <td className="py-2.5 pr-4">
                     <span
-                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium font-mono ${
                         row.score < 0.6
-                          ? "bg-red-50 text-red-700"
+                          ? "bg-red-50 text-red-700 border border-red-200"
                           : row.score < 0.8
-                            ? "bg-amber-50 text-amber-700"
-                            : "bg-green-50 text-green-700"
+                            ? "bg-amber-50 text-amber-700 border border-amber-200"
+                            : "bg-slate-100 text-slate-700 border border-slate-200"
                       }`}
                     >
                       {(row.score * 100).toFixed(0)}
@@ -607,61 +663,6 @@ function LowScoringQueries({
             </tbody>
           </table>
         </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// --- Health Radar (component scores) ---
-
-function HealthRadar({
-  summary,
-  loading,
-}: {
-  summary: MetricsSummary | null;
-  loading: boolean;
-}) {
-  if (loading) return <SkeletonCard />;
-  if (!summary) return <EmptyState message="No data yet" />;
-
-  const { latency, empty_result_rate, citation_accuracy } = summary.components;
-  const data = [
-    { metric: "Latency", score: latency.score },
-    { metric: "Retrieval", score: empty_result_rate.score },
-    { metric: "Citations", score: citation_accuracy.score },
-  ];
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Health breakdown</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ResponsiveContainer width="100%" height={260}>
-          <RadarChart data={data} cx="50%" cy="50%" outerRadius="72%">
-            <PolarGrid stroke="#d9d9d9" />
-            <PolarAngleAxis
-              dataKey="metric"
-              tick={{ fontSize: 11, fill: "#404040" }}
-            />
-            <PolarRadiusAxis
-              domain={[0, 100]}
-              tick={{ fontSize: 10, fill: "#8c8c8c" }}
-            />
-            <Radar
-              dataKey="score"
-              stroke="#1a1a1a"
-              fill="#404040"
-              fillOpacity={0.35}
-              strokeWidth={2}
-            />
-            <Tooltip
-              content={
-                <ChartTooltip valueFormatter={(v) => Math.round(v) + "/100"} />
-              }
-            />
-          </RadarChart>
-        </ResponsiveContainer>
       </CardContent>
     </Card>
   );
@@ -844,7 +845,7 @@ export default function DashboardPage() {
       <div className="mb-8">
         <h1 className="text-2xl font-semibold text-foreground font-serif tracking-tight">Dashboard</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          System health and RAG pipeline metrics
+          System operational metrics and RAG pipeline telemetry
         </p>
       </div>
 
@@ -860,94 +861,22 @@ export default function DashboardPage() {
         <EmptyState message="No data yet" />
       )}
 
-      {/* Grid sections */}
+      {/* Main Grid sections */}
       <div className="space-y-6">
-        {/* Row 1: Health gauge + Empty rate sparkline */}
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-          {/* Health score gauge */}
-          <Card>
-            <CardContent className="flex items-center justify-center py-6">
-              {summaryLoading ? (
-                <div className="size-[200px] animate-pulse rounded-full bg-muted" />
-              ) : summary ? (
-                <HealthGauge score={summary.health_score} />
-              ) : (
-                <div className="flex flex-col items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Health Score</span>
-                  <span className="text-4xl font-bold text-muted-foreground">--</span>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Component scores (latency, empty rate, citation accuracy) */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Component scores</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {summaryLoading ? (
-                <div className="space-y-3">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="h-4 w-full animate-pulse rounded bg-muted" />
-                  ))}
-                </div>
-              ) : summary ? (
-                <div className="space-y-4">
-                  {[
-                    {
-                      label: "Latency",
-                      score: summary.components.latency.score,
-                    },
-                    {
-                      label: "Empty result rate",
-                      score: summary.components.empty_result_rate.score,
-                    },
-                    {
-                      label: "Citation accuracy",
-                      score: summary.components.citation_accuracy.score,
-                    },
-                  ].map((item) => (
-                    <div key={item.label} className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">
-                        {item.label}
-                      </span>
-                      <span
-                        className={`text-sm font-semibold ${
-                          item.score < 60
-                            ? "text-red-600"
-                            : item.score < 80
-                              ? "text-amber-600"
-                              : "text-green-600"
-                        }`}
-                      >
-                        {item.score}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">No data yet</p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Empty result rate sparkline */}
-          <EmptyResultRate
-            data={timeseries7d?.data || []}
-            loading={ts7dLoading}
-          />
-        </div>
-
-        {/* Row 2: Faithfulness trend */}
-        <FaithfulnessTrend
-          data7d={timeseries7d?.data || []}
-          data30d={timeseries30d?.data || []}
-          loading={ts7dLoading && ts30dLoading}
+        {/* Row 1: KPI Stat Cards Grid */}
+        <SummaryStatsGrid
+          summary={summary}
+          timeseries7d={timeseries7d}
+          loading={summaryLoading}
         />
 
+        {/* Row 2: Search Quality Trend & Pipeline Activity */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <HealthRadar summary={summary} loading={summaryLoading} />
+          <FaithfulnessTrend
+            data7d={timeseries7d?.data || []}
+            data30d={timeseries30d?.data || []}
+            loading={ts7dLoading && ts30dLoading}
+          />
           <PipelineActivity data={timeseries7d?.data || []} loading={ts7dLoading} />
         </div>
 
@@ -963,14 +892,14 @@ export default function DashboardPage() {
           />
         </div>
 
-        {/* Row 4: Reranker Fallback Rate & Token Burn */}
+        {/* Row 4: Reranker Fallback Rate & Token Cost Trend (Dark Slate Theme) */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {/* Reranker Value & Fallback Rate */}
+          {/* Reranker Fallback Rate */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Reranker Fallback Rate</CardTitle>
               {rerankerStats && (
-                <Badge variant={rerankerStats.fallback_rate_pct > 15 ? "destructive" : "secondary"}>
+                <Badge variant="outline" className="font-mono text-xs border-slate-200 text-slate-700 bg-slate-50">
                   Fallback: {rerankerStats.fallback_rate_pct}%
                 </Badge>
               )}
@@ -980,11 +909,11 @@ export default function DashboardPage() {
                 <ResponsiveContainer width="100%" height={160}>
                   <BarChart data={rerankerStats.daily}>
                     <CartesianGrid stroke="#bfbfbf" strokeDasharray="3 3" />
-                    <XAxis dataKey="date" tick={{ fontSize: 10 }} />
-                    <YAxis tick={{ fontSize: 10 }} />
-                    <Tooltip />
-                    <Bar dataKey="total_calls" name="Total Reranks" fill="#3b82f6" radius={[2, 2, 0, 0]} />
-                    <Bar dataKey="fallback_calls" name="Fallbacks" fill="#f59e0b" radius={[2, 2, 0, 0]} />
+                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#595959" }} />
+                    <YAxis tick={{ fontSize: 10, fill: "#595959" }} />
+                    <Tooltip content={<ChartTooltip />} />
+                    <Bar dataKey="total_calls" name="Total Reranks" fill="#404040" radius={[2, 2, 0, 0]} />
+                    <Bar dataKey="fallback_calls" name="Fallbacks" fill="#8c8c8c" radius={[2, 2, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
@@ -998,7 +927,7 @@ export default function DashboardPage() {
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Token Cost & Usage Trend</CardTitle>
               {tokenUsage && (
-                <Badge variant="outline" className="font-mono text-xs">
+                <Badge variant="outline" className="font-mono text-xs border-slate-200 text-slate-700 bg-slate-50">
                   {tokenUsage.total_tokens?.toLocaleString() || 0} Total Tokens
                 </Badge>
               )}
@@ -1008,11 +937,11 @@ export default function DashboardPage() {
                 <ResponsiveContainer width="100%" height={160}>
                   <AreaChart data={tokenUsage.daily}>
                     <CartesianGrid stroke="#bfbfbf" strokeDasharray="3 3" />
-                    <XAxis dataKey="date" tick={{ fontSize: 10 }} />
-                    <YAxis tick={{ fontSize: 10 }} />
-                    <Tooltip />
-                    <Area type="monotone" dataKey="input_tokens" name="Input Tokens" stroke="#6366f1" fill="#c7d2fe" />
-                    <Area type="monotone" dataKey="output_tokens" name="Output Tokens" stroke="#10b981" fill="#a7f3d0" />
+                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#595959" }} />
+                    <YAxis tick={{ fontSize: 10, fill: "#595959" }} />
+                    <Tooltip content={<ChartTooltip />} />
+                    <Area type="monotone" dataKey="input_tokens" name="Input Tokens" stroke="#404040" fill="#d4d4d4" />
+                    <Area type="monotone" dataKey="output_tokens" name="Output Tokens" stroke="#737373" fill="#e5e5e5" />
                   </AreaChart>
                 </ResponsiveContainer>
               ) : (
@@ -1022,12 +951,18 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        {/* Row 5: Surfaced Issues & Slow Traces Panel */}
+        {/* Row 5: Empty Result Rate Trend */}
+        <EmptyResultRate
+          data={timeseries7d?.data || []}
+          loading={ts7dLoading}
+        />
+
+        {/* Row 6: Surfaced Issues & Slow Traces Panel */}
         {surfacedTraces && (surfacedTraces.recent_errors?.length > 0 || surfacedTraces.slow_traces?.length > 0) && (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Surfaced Pipeline Issues & Slow Traces</CardTitle>
-              <a href="/traces" className="text-xs font-semibold text-blue-600 hover:underline">
+              <a href="/traces" className="text-xs font-semibold text-slate-700 hover:text-slate-900 underline">
                 Open Trace Inspector →
               </a>
             </CardHeader>
@@ -1035,7 +970,7 @@ export default function DashboardPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                 {/* Recent Errors */}
                 <div className="space-y-2">
-                  <span className="font-bold text-red-600 tracking-wide uppercase text-[10px]">
+                  <span className="font-bold text-slate-700 tracking-wide uppercase text-[10px]">
                     Recent Errors & Fallbacks ({surfacedTraces.recent_errors?.length || 0})
                   </span>
                   <div className="space-y-1.5">
@@ -1052,7 +987,7 @@ export default function DashboardPage() {
 
                 {/* Slow Traces */}
                 <div className="space-y-2">
-                  <span className="font-bold text-amber-600 tracking-wide uppercase text-[10px]">
+                  <span className="font-bold text-slate-700 tracking-wide uppercase text-[10px]">
                     Slow Traces (p95+ &gt; 2s) ({surfacedTraces.slow_traces?.length || 0})
                   </span>
                   <div className="space-y-1.5">
@@ -1069,7 +1004,7 @@ export default function DashboardPage() {
           </Card>
         )}
 
-        {/* Row 6: Low-scoring queries */}
+        {/* Row 7: Low-scoring queries */}
         <LowScoringQueries
           data={lowScoreData}
           loading={loading && lowScoreData.length === 0}

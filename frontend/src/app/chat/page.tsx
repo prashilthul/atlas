@@ -27,11 +27,13 @@ import {
   PanelLeft,
   PanelLeftClose,
   Square,
+  Upload,
 } from "lucide-react";
 import { fetchPapers, fetchPaper, deletePaper, type Paper, type PaperDetail } from "@/lib/api";
 import { showToast } from "@/components/toast";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { TraceWaterfall } from "@/components/trace-waterfall";
+import { UploadDialog } from "@/components/upload-dialog";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -401,12 +403,14 @@ export default function ChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [evaluationEnabled, setEvaluationEnabled] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
   const [expandedTraces, setExpandedTraces] = useState<Set<string>>(new Set());
 
   // Chat session history state
   const [sessions, setSessions] = useState<Array<{ id: string; title: string; created_at: string }>>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
+  const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
 
   const CHAT_STORAGE_KEY = "paperpilot.active_chat";
 
@@ -427,7 +431,14 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
-    if (!sessionId && messages.length === 0) return;
+    if (!sessionId || messages.length === 0) {
+      try {
+        localStorage.removeItem(CHAT_STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+      return;
+    }
     try {
       localStorage.setItem(
         CHAT_STORAGE_KEY,
@@ -438,24 +449,43 @@ export default function ChatPage() {
     }
   }, [sessionId, messages]);
 
+  const startNewChat = useCallback(() => {
+    setSessionId(null);
+    setMessages([]);
+    setInput("");
+    setError(null);
+    try {
+      localStorage.removeItem(CHAT_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const fetchSessions = useCallback(async () => {
     try {
       const base = API_BASE || (typeof window !== "undefined" ? window.location.origin : "");
       const res = await fetch(`${base}/api/chat/sessions`);
       if (res.ok) {
         const data = await res.json();
-        setSessions(data || []);
+        const fetchedList: Array<{ id: string; title: string; created_at: string }> = data || [];
+        setSessions(fetchedList);
+
+        if (sessionId && !fetchedList.some((s) => s.id === sessionId)) {
+          startNewChat();
+        }
       }
     } catch {
       // ignore
     }
-  }, []);
+  }, [sessionId, startNewChat]);
 
   useEffect(() => {
     fetchSessions();
   }, [fetchSessions]);
 
   const loadSession = async (id: string) => {
+    if (loadingSessionId || sending) return;
+    setLoadingSessionId(id);
     try {
       const base = API_BASE || (typeof window !== "undefined" ? window.location.origin : "");
       const res = await fetch(`${base}/api/chat/sessions/${id}`);
@@ -469,48 +499,64 @@ export default function ChatPage() {
             content: m.content,
             citations: m.citations,
             trace_id: m.trace_id,
+            streaming: false,
           }))
         );
+        setError(null);
+      } else {
+        throw new Error("Failed to load session");
       }
     } catch {
       showToast("error", "Error", "Failed to load chat history.");
-    }
-  };
-
-  const startNewChat = () => {
-    setSessionId(null);
-    setMessages([]);
-    setInput("");
-    setError(null);
-    try {
-      localStorage.removeItem(CHAT_STORAGE_KEY);
-    } catch {
-      // ignore
+    } finally {
+      setLoadingSessionId(null);
     }
   };
 
   const confirmDeleteSession = async () => {
     if (!sessionToDelete) return;
+    const targetId = sessionToDelete;
+    setSessionToDelete(null);
+
     try {
       const base = API_BASE || (typeof window !== "undefined" ? window.location.origin : "");
-      const res = await fetch(`${base}/api/chat/sessions/${sessionToDelete}`, { method: "DELETE" });
-      if (res.ok) {
-        showToast("success", "Chat Deleted", "Session removed.");
-        if (sessionId === sessionToDelete) {
-          startNewChat();
-        }
-        fetchSessions();
+      const res = await fetch(`${base}/api/chat/sessions/${targetId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Failed to delete session (HTTP ${res.status})`);
       }
+
+      showToast("success", "Chat Deleted", "Session removed.");
+
+      if (sessionId === targetId) {
+        startNewChat();
+      }
+      await fetchSessions();
     } catch {
-      showToast("error", "Error", "Could not delete session.");
-    } finally {
-      setSessionToDelete(null);
+      showToast("error", "Error", "Could not delete chat session. Please try again.");
     }
   };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Auto-resize textarea height as text grows
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
+    }
+  }, [input]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (input.trim() && !sending) {
+        sendMessage(input);
+      }
+    }
+  };
 
   // Load available papers
   const loadPapers = useCallback(async () => {
@@ -707,10 +753,11 @@ export default function ChatPage() {
       } finally {
         setSending(false);
         abortRef.current = null;
-        inputRef.current?.focus();
+        textareaRef.current?.focus();
+        fetchSessions();
       }
     },
-    [sending, selectedPaperId, sessionId, evaluationEnabled, availablePapers]
+    [sending, selectedPaperId, sessionId, evaluationEnabled, availablePapers, fetchSessions]
   );
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -773,19 +820,24 @@ export default function ChatPage() {
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
             {sessions.map((sess) => {
               const isActive = sessionId === sess.id;
+              const isLoading = loadingSessionId === sess.id;
               return (
                 <div
                   key={sess.id}
                   onClick={() => loadSession(sess.id)}
                   className={`group flex items-center justify-between p-2 rounded-lg cursor-pointer text-xs transition-colors ${
                     isActive
-                      ? "bg-slate-100 text-slate-900 font-semibold"
-                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                      ? "bg-slate-900 text-white font-semibold shadow-2xs"
+                      : "text-slate-700 hover:bg-slate-100 hover:text-slate-900"
                   }`}
                 >
                   <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <MessageSquare className="size-3.5 text-slate-400 shrink-0" />
-                    <span className="truncate">{sess.title || "New Chat"}</span>
+                    {isLoading ? (
+                      <Loader2 className="size-3.5 animate-spin text-slate-400 shrink-0" />
+                    ) : (
+                      <MessageSquare className={`size-3.5 shrink-0 ${isActive ? "text-slate-300" : "text-slate-400"}`} />
+                    )}
+                    <span className="truncate">{sess.title || "Untitled Chat"}</span>
                   </div>
                   <Button
                     variant="ghost"
@@ -794,7 +846,11 @@ export default function ChatPage() {
                       e.stopPropagation();
                       setSessionToDelete(sess.id);
                     }}
-                    className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-opacity"
+                    className={`h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity ${
+                      isActive
+                        ? "text-slate-300 hover:text-rose-300 hover:bg-slate-800"
+                        : "text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                    }`}
                     title="Delete chat"
                   >
                     <Trash2 className="size-3" />
@@ -897,6 +953,22 @@ export default function ChatPage() {
             >
               <Sparkles className="size-3 mr-1.5 text-amber-400" />
               {evaluationEnabled ? "Eval On" : "Eval Off"}
+            </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              variant={inspectorOpen ? "default" : "outline"}
+              onClick={() => setInspectorOpen((v) => !v)}
+              className={`h-8 text-xs font-medium transition-all ${
+                inspectorOpen
+                  ? "bg-slate-900 text-white hover:bg-slate-800"
+                  : "text-slate-600 border-slate-300"
+              }`}
+              title={inspectorOpen ? "Hide Paper Inspector" : "Show Paper Inspector"}
+            >
+              <BookOpen className="size-3 mr-1.5 text-slate-300" />
+              {inspectorOpen ? "Inspector On" : "Inspector Off"}
             </Button>
 
             <Button
@@ -1066,25 +1138,43 @@ export default function ChatPage() {
         </div>
 
         {/* Input Bar */}
-        <div className="border-t border-slate-200 bg-white px-4 py-3.5 shadow-sm shrink-0">
-          <form onSubmit={handleSubmit} className="flex items-center gap-2 max-w-4xl mx-auto">
-            <Input
-              ref={inputRef}
+        <div className="border-t border-slate-200 bg-white px-4 py-3 shadow-sm shrink-0">
+          <form onSubmit={handleSubmit} className="flex items-end gap-2 max-w-4xl mx-auto">
+            <UploadDialog
+              trigger={
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  aria-label="Upload paper"
+                  title="Upload new research paper"
+                  className="h-11 w-11 rounded-xl border-slate-300 text-slate-700 hover:bg-slate-100 shadow-2xs shrink-0 transition-all cursor-pointer"
+                >
+                  <Upload className="size-4 text-slate-700" />
+                </Button>
+              }
+            />
+
+            <textarea
+              ref={textareaRef}
+              rows={1}
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
               placeholder={
                 selectedPaperDetail
-                  ? `Ask about "${selectedPaperDetail.title.slice(0, 30)}..."`
-                  : "Ask a question about your uploaded research papers..."
+                  ? `Ask about "${selectedPaperDetail.title.slice(0, 30)}..." (Shift+Enter for newline)`
+                  : "Ask a question... (Enter to send, Shift+Enter for newline)"
               }
               disabled={sending}
-              className="flex-1 h-11 text-sm bg-slate-50 border-slate-300 rounded-xl focus:bg-white focus:ring-2 focus:ring-slate-400 transition-all px-4"
+              className="flex-1 min-h-[44px] max-h-40 py-2.5 px-4 text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400 transition-all resize-none font-sans leading-relaxed text-slate-900 placeholder:text-slate-400"
             />
+
             <Button
               type="submit"
               size="icon"
               disabled={!input.trim() || sending}
-              className="h-11 w-11 rounded-xl bg-slate-900 hover:bg-slate-800 text-white shadow-sm shrink-0 transition-all disabled:opacity-50"
+              className="h-11 w-11 rounded-xl bg-slate-900 hover:bg-slate-800 text-white shadow-2xs shrink-0 transition-all disabled:opacity-50 cursor-pointer"
             >
               <Send className="size-4" />
             </Button>
@@ -1094,7 +1184,7 @@ export default function ChatPage() {
                 size="icon"
                 onClick={handleStop}
                 aria-label="Stop generating"
-                className="h-11 w-11 rounded-xl bg-rose-600 hover:bg-rose-700 text-white shadow-sm shrink-0 transition-all"
+                className="h-11 w-11 rounded-xl bg-rose-600 hover:bg-rose-700 text-white shadow-2xs shrink-0 transition-all cursor-pointer"
               >
                 <Square className="size-4" />
               </Button>
@@ -1104,129 +1194,122 @@ export default function ChatPage() {
       </div>
 
       {/* Right Drawer — Paper Reader & Document Sections */}
-      <div className="hidden lg:flex w-96 border-l border-slate-200 bg-white flex-col shrink-0 h-full">
-        {/* Header */}
-        <div className="border-b border-slate-200 px-4 py-3 bg-slate-50 flex items-center justify-between shrink-0">
-          <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-            <BookOpen className="size-3.5 text-slate-700" />
-            Paper Inspector
-          </h3>
+      {inspectorOpen && (
+        <div className="hidden lg:flex w-96 border-l border-slate-200 bg-white flex-col shrink-0 h-full">
+          {/* Header */}
+          <div className="border-b border-slate-200 px-4 py-3 bg-slate-50 flex items-center justify-between shrink-0">
+            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+              <BookOpen className="size-3.5 text-slate-700" />
+              Paper Inspector
+            </h3>
 
-          {selectedPaperDetail && (
-            <Badge variant="outline" className="text-[10px] font-mono">
-              {selectedPaperDetail.chunk_count} Chunks
-            </Badge>
-          )}
-        </div>
+            <div className="flex items-center gap-2">
+              {selectedPaperDetail && (
+                <Badge variant="outline" className="text-[10px] font-mono">
+                  {selectedPaperDetail.chunk_count} Chunks
+                </Badge>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setInspectorOpen(false)}
+                className="h-6 w-6 p-0 text-slate-400 hover:text-slate-900 hover:bg-slate-200 rounded-md"
+                title="Close Paper Inspector"
+              >
+                <X className="size-3.5" />
+              </Button>
+            </div>
+          </div>
 
-        {/* Drawer Content */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {selectedPaperDetail ? (
-            <>
-              {/* Paper Title Summary Card */}
-              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
-                <div className="flex items-start justify-between gap-2">
-                  <h4 className="text-xs font-bold text-slate-900 leading-snug">
-                    {selectedPaperDetail.title}
-                  </h4>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 w-6 p-0 text-slate-400 hover:text-rose-600 shrink-0"
-                    title="Delete paper"
-                    onClick={handleDeleteActivePaper}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
+          {/* Drawer Content */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {selectedPaperDetail ? (
+              <>
+                {/* Paper Title Summary Card */}
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <h4 className="text-xs font-bold text-slate-900 leading-snug">
+                      {selectedPaperDetail.title}
+                    </h4>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    {selectedPaperDetail.authors?.length > 0
+                      ? selectedPaperDetail.authors.join(", ")
+                      : "Authors not specified"}
+                  </p>
                 </div>
-                <p className="text-[11px] text-slate-500 truncate">
-                  {selectedPaperDetail.authors?.length
-                    ? selectedPaperDetail.authors.join(", ")
-                    : "Authors not specified"}
-                </p>
-                {selectedPaperDetail.year && (
-                  <Badge variant="secondary" className="text-[10px]">
-                    Year: {selectedPaperDetail.year}
-                  </Badge>
-                )}
-              </div>
 
-              {/* Reader & Document Sections */}
-              <div className="space-y-4">
+                {/* Abstract Section */}
                 {selectedPaperDetail.abstract && (
                   <div className="space-y-1.5">
-                    <h5 className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
                       Abstract
-                    </h5>
-                    <p className="text-xs leading-relaxed text-slate-700 bg-white p-3.5 border border-slate-200 rounded-xl shadow-2xs">
+                    </span>
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 leading-relaxed max-h-48 overflow-y-auto">
                       {selectedPaperDetail.abstract}
-                    </p>
-                  </div>
-                )}
-
-                {selectedPaperDetail.sections?.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <h5 className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                        Document Sections ({selectedPaperDetail.sections.length})
-                      </h5>
-                    </div>
-
-                    {/* Section Search Filter */}
-                    <div className="relative">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-slate-400" />
-                      <input
-                        type="text"
-                        value={sectionSearch}
-                        onChange={(e) => setSectionSearch(e.target.value)}
-                        placeholder="Filter sections or text..."
-                        className="w-full h-7 pl-8 pr-3 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-400"
-                      />
-                    </div>
-
-                    {/* Section Accordions */}
-                    <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
-                      {filteredSections.map((sec) => (
-                        <details
-                          key={sec.id}
-                          className="group rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs"
-                        >
-                          <summary className="flex cursor-pointer items-start justify-between px-3.5 py-2.5 hover:bg-slate-50 transition-colors">
-                            <span className="text-xs font-semibold text-slate-900 leading-snug pr-2">{sec.heading}</span>
-                            <ChevronDown className="size-4 text-slate-400 transition-transform group-open:rotate-180 shrink-0 mt-0.5" />
-                          </summary>
-                          {sec.content && (
-                            <div className="border-t border-slate-100 p-3.5 text-xs leading-relaxed text-slate-700 bg-slate-50/60 whitespace-pre-wrap">
-                              {sec.content}
-                            </div>
-                          )}
-                        </details>
-                      ))}
-                      {filteredSections.length === 0 && (
-                        <p className="text-center py-4 text-xs text-slate-400">
-                          No matching sections found.
-                        </p>
-                      )}
                     </div>
                   </div>
                 )}
+
+                {/* Document Sections List */}
+                <div className="space-y-2 pt-2 border-t border-slate-100">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      Document Sections ({selectedPaperDetail.sections?.length || 0})
+                    </span>
+                  </div>
+
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-slate-400" />
+                    <Input
+                      placeholder="Filter sections or text..."
+                      value={sectionSearch}
+                      onChange={(e) => setSectionSearch(e.target.value)}
+                      className="h-7 pl-8 text-xs bg-slate-50"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5 max-h-[calc(100vh-24rem)] overflow-y-auto pr-1">
+                    {filteredSections.map((sec) => (
+                      <details
+                        key={sec.id}
+                        className="group rounded-lg border border-slate-200 bg-white text-xs overflow-hidden transition-colors"
+                      >
+                        <summary className="flex items-center justify-between p-2.5 cursor-pointer font-semibold text-slate-800 hover:bg-slate-50 transition-colors select-none">
+                          <span className="truncate pr-2">{sec.heading}</span>
+                          <ChevronRight className="size-3.5 text-slate-400 group-open:rotate-90 transition-transform shrink-0" />
+                        </summary>
+                        {sec.content && (
+                          <div className="p-2.5 pt-0 text-slate-600 border-t border-slate-100 bg-slate-50/50 leading-relaxed text-[11px] max-h-40 overflow-y-auto">
+                            {sec.content}
+                          </div>
+                        )}
+                      </details>
+                    ))}
+                    {filteredSections.length === 0 && (
+                      <p className="text-center py-4 text-xs text-slate-400">
+                        No matching sections found.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-center p-6 space-y-3">
+                <div className="size-12 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400">
+                  <FileText className="size-6" />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-slate-800">No Active Paper Selected</p>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Select a specific paper from the top dropdown or upload a PDF to inspect its full document sections.
+                  </p>
+                </div>
               </div>
-            </>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full text-center p-6 space-y-3">
-              <div className="size-12 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400">
-                <FileText className="size-6" />
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-slate-800">No Active Paper Selected</p>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Select a specific paper from the top dropdown or upload a PDF to inspect its full document sections.
-                </p>
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Delete Confirmation Modal for Paper */}
       <ConfirmModal

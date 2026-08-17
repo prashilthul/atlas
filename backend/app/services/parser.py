@@ -137,6 +137,11 @@ def _extract_title(blocks: list[_Block]) -> str:
     return title if len(title) > 3 else "Untitled"
 
 
+def _is_abstract_heading(text: str) -> bool:
+    clean = re.sub(r"^(?:\d+|[ivxlcdm]+)\s*\.\s*", "", text.strip().lower().rstrip(".:"))
+    return clean == "abstract"
+
+
 def _extract_authors(blocks: list[_Block]) -> tuple[list[str], int]:
     first_page_blocks = [b for b in blocks if b.page_num == 0]
     if not first_page_blocks:
@@ -149,7 +154,7 @@ def _extract_authors(blocks: list[_Block]) -> tuple[list[str], int]:
     for i in range(title_idx + 1, len(blocks)):
         if blocks[i].page_num > 0:
             break
-        if blocks[i].text.strip().lower() == "abstract":
+        if _is_abstract_heading(blocks[i].text):
             abstract_idx = i
             break
 
@@ -178,12 +183,11 @@ def _extract_abstract(blocks: list[_Block], start_idx: int, body_size: float = 1
     recording = False
     for i in range(start_idx, min(start_idx + 20, len(blocks))):
         b = blocks[i]
-        low = b.text.strip().lower().rstrip(".:")
-        if low == "abstract":
+        if _is_abstract_heading(b.text):
             recording = True
             continue
         if recording:
-            if _is_heading(b, body_size, threshold) and low != "abstract":
+            if _is_heading(b, body_size, threshold) and not _is_abstract_heading(b.text):
                 break
             parts.append(b.text.strip())
 
@@ -377,7 +381,7 @@ def parse_pdf(file_path: str | Path | None = None, *, stream: bytes | None = Non
         if abstract:
             for i in range(author_end, len(blocks)):
                 low = blocks[i].text.strip().lower().rstrip(".:")
-                if low == "abstract":
+                if _is_abstract_heading(blocks[i].text):
                     abstract_end = i
                     break
 

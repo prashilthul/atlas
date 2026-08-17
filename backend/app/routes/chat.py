@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -57,7 +57,7 @@ async def chat(
     if not session_id:
         session = ChatSession(title=req.query[:80])
         db.add(session)
-        await db.flush()
+        await db.commit()
         session_id = session.id
 
     tracer = Tracer()
@@ -267,16 +267,10 @@ async def delete_session(
     ).scalar_one_or_none()
 
     if not session:
-        raise HTTPException(404, "Session not found")
+        return {"status": "deleted", "id": str(session_id)}
 
-    # Delete associated messages
-    msgs = (
-        await db.execute(select(ChatMessage).where(ChatMessage.session_id == session_id))
-    ).scalars().all()
-    for m in msgs:
-        await db.delete(m)
-
-    await db.delete(session)
+    await db.execute(delete(ChatMessage).where(ChatMessage.session_id == session_id))
+    await db.execute(delete(ChatSession).where(ChatSession.id == session_id))
     await db.commit()
     return {"status": "deleted", "id": str(session_id)}
 

@@ -84,10 +84,10 @@ async def get_health_score(db: AsyncSession) -> dict:
         else:
             step_scores.append(max(0, round(100 * (1 - (p95 - target) / target))))
 
-    latency_score = round(sum(step_scores) / len(step_scores)) if step_scores else 0
+    latency_score = round(sum(step_scores) / len(step_scores)) if step_scores else 100
 
     empty_rate, total_searches = await get_empty_result_rate(db, hours=24)
-    empty_result_score = round(100 * (1 - empty_rate)) if total_searches > 0 else 0
+    empty_result_score = round(100 * (1 - empty_rate)) if total_searches > 0 else 100
 
     row = await db.execute(
         text("""
@@ -98,14 +98,11 @@ async def get_health_score(db: AsyncSession) -> dict:
         """),
     )
     r = row.one()
-    citation_score = round((r.avg_accuracy or 0) * 100)
+    citation_score = round(r.avg_accuracy * 100) if r.avg_accuracy is not None else 100
 
-    if not latency_rows and total_searches == 0 and r.avg_accuracy is None:
-        health_score = 0
-    else:
-        health_score = round(
-            latency_score * 0.33 + empty_result_score * 0.33 + citation_score * 0.34
-        )
+    health_score = round(
+        latency_score * 0.33 + empty_result_score * 0.33 + citation_score * 0.34
+    )
 
     return {
         "health_score": health_score,

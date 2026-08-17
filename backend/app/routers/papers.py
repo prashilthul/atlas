@@ -292,12 +292,13 @@ async def _embed_and_update(paper_id: UUID) -> None:
             await db.commit()
 
             logger.info("Embedding complete for paper %s", paper_id)
-        except Exception:
+        except Exception as exc:
             logger.exception("Embedding failed for paper %s", paper_id)
+            err_msg = f"Embedding pipeline failed: {str(exc)[:500]}"
             stmt = (
                 update(Paper)
                 .where(Paper.id == paper_id)
-                .values(status="error", error_message="Embedding pipeline failed")
+                .values(status="error", error_message=err_msg)
             )
             await db.execute(stmt)
             await db.commit()

@@ -80,7 +80,7 @@ def _content_tokens(query: str) -> list[str]:
 
 def _build_tsquery(query: str) -> str | None:
     tokens = _content_tokens(query)
-    if len(tokens) < 2:
+    if not tokens:
         return None
     return " | ".join(tokens)
 

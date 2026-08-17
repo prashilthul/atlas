@@ -228,7 +228,10 @@ async def get_low_scoring_queries(
                     (follow.eval_scores->>'citation_accuracy')::float,
                     (
                         SELECT AVG((x.value)::float)
-                        FROM jsonb_each_text(follow.eval_scores) AS x
+                        FROM jsonb_each_text(
+                            CASE WHEN jsonb_typeof(follow.eval_scores) = 'object'
+                                 THEN follow.eval_scores ELSE NULL END
+                        ) AS x
                         WHERE x.value ~ '^[-+]?[0-9]*\.?[0-9]+$'
                     )
                 ) AS score

@@ -72,6 +72,33 @@ sequenceDiagram
 
 ---
 
+## Advanced RAG Engineering & Evaluation Strategy
+
+Paper Pilot incorporates industry-standard production RAG patterns designed to eliminate common failure modes (such as retrieval vocabulary gaps, hallucinated citations, and context dilution).
+
+### 1. Multi-Stage Retrieval Architecture
+* **Structure-Aware Section Chunking**: PDF layout font metadata is extracted via PyMuPDF to construct section hierarchies. Content is chunked along section boundaries with parent-child metadata rather than naive token splitting.
+* **Hybrid Search + Reciprocal Rank Fusion (RRF)**: Executes dense vector similarity search (`pgvector` cosine ops) alongside sparse lexical full-text search (`to_tsvector`), fusing ranks via RRF ($k=60$) to capture both semantic meaning and specific keyword terms.
+* **Cross-Encoder Reranking**: Re-scores top 20 candidate chunks down to top 5 using a cross-encoder model before context construction, significantly boosting context precision.
+* **Multi-Turn Query Rewriting**: Evaluates user conversation history to rewrite ambiguous follow-up questions before executing retrieval.
+
+### 2. Evaluation System (Online & Batch)
+The platform includes dual evaluation pipelines to track grounding and retrieval performance:
+
+* **Online LLM-as-a-Judge (`online_eval.py`)**: Evaluates responses live in production asynchronously (5% background sampling, 100% coverage on errors):
+  * **Faithfulness**: Measures if generated claims are 100% supported by the retrieved context.
+  * **Citation Accuracy**: Verifies that each inline citation badge `[N]` points to a chunk containing the true factual evidence.
+* **Batch RAGAS Evaluation (`scripts/ragas_eval.py`)**: Automated test suite measuring standard RAG metrics:
+  * **Faithfulness**: Claim verification ratio against retrieved context.
+  * **Answer Relevancy**: Direct semantic alignment between query intent and response.
+  * **Context Precision**: Signal-to-noise ratio in top-ranked chunks.
+  * **Context Recall**: Ground-truth coverage across retrieved chunks.
+
+### 3. Telemetry & Execution Tracing
+Every request records OpenTelemetry-style execution spans (`embed`, `query_rewrite`, `vector_search`, `lexical_search`, `rerank`, `generate`, `judge`). Spans capture timing, token counts, and retrieval scores, feeding directly into the **Trace Inspector** waterfall view and operational **Dashboard KPIs**.
+
+---
+
 ## Key Features
 
 * **Structure-Aware Chunking**: Chunks papers by section headings rather than arbitrary token boundaries, preserving topical context.

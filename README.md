@@ -6,6 +6,19 @@ Built with operational transparency in mind, every query features **end-to-end r
 
 ---
 
+## Interface Screenshots
+
+### Grounded Research Chat
+![Grounded Research Chat](photos/chat.png)
+
+### Metrics Dashboard
+![Operational Metrics Dashboard](photos/dashboard.png)
+
+### Trace Inspector
+![Trace Waterfall Inspector](photos/trace.png)
+
+---
+
 ## Architecture
 
 ```mermaid
